@@ -240,7 +240,7 @@ router.patch(
             suspended,
           },
           {
-            new: true,
+            returnDocument: "after",
             runValidators: true,
           }
         ).select(
@@ -310,7 +310,7 @@ router.patch(
             role,
           },
           {
-            new: true,
+            returnDocument: "after",
             runValidators: true,
           }
         ).select(

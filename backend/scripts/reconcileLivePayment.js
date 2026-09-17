@@ -154,7 +154,7 @@ async function run() {
           },
         },
         {
-          new: true,
+          returnDocument: "after",
           runValidators: true,
           session,
         },

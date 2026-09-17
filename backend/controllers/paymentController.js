@@ -162,7 +162,7 @@ async function ensureWallet(userId) {
         },
         {
           upsert: true,
-          new: true,
+         returnDocument: "after",
           setDefaultsOnInsert: true,
           runValidators: true,
         },
@@ -753,7 +753,7 @@ async function creditVerifiedPayment({
         },
       },
       {
-        new: true,
+       returnDocument: "after",
         runValidators: true,
       },
     );

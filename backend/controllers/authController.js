@@ -165,7 +165,7 @@ async function ensureWallet(userId) {
           },
         },
         {
-          new: true,
+         returnDocument: "after",
           upsert: true,
           setDefaultsOnInsert: true,
           projection: {

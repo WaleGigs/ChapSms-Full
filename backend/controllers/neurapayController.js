@@ -322,7 +322,7 @@ async function ensureWallet(
         },
         {
           upsert: true,
-          new: true,
+         returnDocument: "after",
           setDefaultsOnInsert:
             true,
           runValidators: true,
@@ -494,7 +494,7 @@ async function upsertTransactionRecord({
         },
         update,
         {
-          new: true,
+       returnDocument: "after",
           upsert: true,
           setDefaultsOnInsert:
             true,
@@ -692,7 +692,7 @@ async function verifyAndCredit({
           },
         },
         {
-          new: true,
+         returnDocument: "after",
           runValidators: true,
         }
       );
