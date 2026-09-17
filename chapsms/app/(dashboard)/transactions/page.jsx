@@ -112,6 +112,146 @@ function formatNaira(value) {
   })}`;
 }
 
+
+function humanizeCredentialKey(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function credentialToText(
+  value,
+  {
+    prefix = "",
+    depth = 0,
+    seen = new WeakSet(),
+  } = {}
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "";
+  }
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    const primitive =
+      String(value).trim();
+
+    if (
+      !primitive ||
+      primitive === "[object Object]"
+    ) {
+      return "";
+    }
+
+    return prefix
+      ? `${prefix}: ${primitive}`
+      : primitive;
+  }
+
+  if (depth > 6) {
+    return "";
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        credentialToText(item, {
+          prefix: "",
+          depth: depth + 1,
+          seen,
+        })
+      )
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (typeof value === "object") {
+    if (seen.has(value)) {
+      return "";
+    }
+
+    seen.add(value);
+
+    const containerKeys =
+      new Set([
+        "details",
+        "detail",
+        "credential",
+        "credentials",
+        "account",
+        "accounts",
+        "login",
+        "data",
+        "items",
+        "keys",
+        "delivered",
+        "result",
+        "value",
+      ]);
+
+    const ignoredKeys =
+      new Set([
+        "id",
+        "_id",
+        "order_id",
+        "orderid",
+        "product_id",
+        "productid",
+        "status",
+        "success",
+        "charged",
+        "charge",
+        "price",
+        "cost",
+      ]);
+
+    const lines = [];
+
+    for (const [rawKey, rawValue] of Object.entries(value)) {
+      const normalizedKey =
+        String(rawKey || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9_]/g, "");
+
+      if (
+        ignoredKeys.has(normalizedKey) ||
+        rawValue === null ||
+        rawValue === undefined ||
+        rawValue === ""
+      ) {
+        continue;
+      }
+
+      const nested =
+        credentialToText(rawValue, {
+          prefix:
+            containerKeys.has(normalizedKey)
+              ? ""
+              : humanizeCredentialKey(rawKey),
+          depth: depth + 1,
+          seen,
+        });
+
+      if (nested) {
+        lines.push(nested);
+      }
+    }
+
+    return lines.join("\n");
+  }
+
+  return "";
+}
+
 function statusClasses(status) {
   const normalized = String(status || "").toLowerCase();
   if (["received", "completed"].includes(normalized)) {
@@ -262,7 +402,12 @@ export default function TransactionsPage() {
     const query = socialSearch.trim().toLowerCase();
     if (!query) return socialOrders;
     return socialOrders.filter((order) =>
-      [order.productName, order.category, order.status, ...(order.deliveredItems || [])]
+      [
+        order.productName,
+        order.category,
+        order.status,
+        ...(order.deliveredItems || []).map(credentialToText),
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -424,14 +569,20 @@ export default function TransactionsPage() {
 
                     {expandedCredentials[order.id || order._id] ? (
                       <div className="mt-3 space-y-2">
-                        {order.deliveredItems.map((item, index) => (
-                          <div key={`${order.id}-${index}`} className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
-                            <p className="whitespace-pre-wrap break-all font-mono text-xs font-semibold leading-5">{item}</p>
-                            <button type="button" onClick={() => copy(item)} className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-xs font-bold">
-                              <Copy size={15} /> Copy
-                            </button>
-                          </div>
-                        ))}
+                        {order.deliveredItems.map((item, index) => {
+                          const credentialText =
+                            credentialToText(item) ||
+                            "Credential details unavailable";
+
+                          return (
+                            <div key={`${order.id}-${index}`} className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
+                              <p className="whitespace-pre-wrap break-all font-mono text-xs font-semibold leading-5">{credentialText}</p>
+                              <button type="button" onClick={() => copy(credentialText)} className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-xs font-bold">
+                                <Copy size={15} /> Copy
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : null}
                   </div>
