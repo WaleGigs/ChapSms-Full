@@ -46,6 +46,269 @@ function normalizeText(value) {
     .replace(/\s+/g, " ");
 }
 
+
+function humanizeCredentialKey(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function credentialToText(
+  value,
+  {
+    prefix = "",
+    depth = 0,
+    seen = new WeakSet(),
+  } = {}
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "";
+  }
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    const primitive =
+      String(value).trim();
+
+    if (
+      !primitive ||
+      primitive ===
+        "[object Object]"
+    ) {
+      return "";
+    }
+
+    return prefix
+      ? `${prefix}: ${primitive}`
+      : primitive;
+  }
+
+  if (depth > 6) {
+    return "";
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        credentialToText(
+          item,
+          {
+            prefix: "",
+            depth: depth + 1,
+            seen,
+          }
+        )
+      )
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (
+    typeof value === "object"
+  ) {
+    if (seen.has(value)) {
+      return "";
+    }
+
+    seen.add(value);
+
+    const containerKeys =
+      new Set([
+        "details",
+        "detail",
+        "credential",
+        "credentials",
+        "account",
+        "accounts",
+        "login",
+        "data",
+        "items",
+        "keys",
+        "delivered",
+        "result",
+        "value",
+      ]);
+
+    const ignoredKeys =
+      new Set([
+        "id",
+        "_id",
+        "order_id",
+        "orderid",
+        "product_id",
+        "productid",
+        "status",
+        "success",
+        "charged",
+        "charge",
+        "price",
+        "cost",
+      ]);
+
+    const lines = [];
+
+    for (
+      const [rawKey, rawValue]
+      of Object.entries(value)
+    ) {
+      const normalizedKey =
+        String(rawKey || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9_]/g, "");
+
+      if (
+        ignoredKeys.has(
+          normalizedKey
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        rawValue === null ||
+        rawValue === undefined ||
+        rawValue === ""
+      ) {
+        continue;
+      }
+
+      const nested =
+        credentialToText(
+          rawValue,
+          {
+            prefix:
+              containerKeys.has(
+                normalizedKey
+              )
+                ? ""
+                : humanizeCredentialKey(
+                    rawKey
+                  ),
+            depth: depth + 1,
+            seen,
+          }
+        );
+
+      if (nested) {
+        lines.push(nested);
+      }
+    }
+
+    return lines.join("\n");
+  }
+
+  return "";
+}
+
+function normalizeCredentialCollection(
+  value
+) {
+  const source =
+    Array.isArray(value)
+      ? value
+      : value === null ||
+          value === undefined
+        ? []
+        : [value];
+
+  return source
+    .map((item) =>
+      credentialToText(item)
+    )
+    .filter(Boolean);
+}
+
+function extractDeliveredItems(
+  providerResponse
+) {
+  if (!providerResponse) {
+    return [];
+  }
+
+  const candidates = [
+    providerResponse?.keys,
+    providerResponse?.delivered,
+    providerResponse?.credentials,
+    providerResponse?.accounts,
+    providerResponse?.account,
+    providerResponse?.details,
+
+    providerResponse?.data?.keys,
+    providerResponse?.data?.delivered,
+    providerResponse?.data?.credentials,
+    providerResponse?.data?.accounts,
+    providerResponse?.data?.account,
+    providerResponse?.data?.details,
+
+    providerResponse?.result?.keys,
+    providerResponse?.result?.delivered,
+    providerResponse?.result?.credentials,
+    providerResponse?.result?.accounts,
+    providerResponse?.result?.account,
+    providerResponse?.result?.details,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized =
+      normalizeCredentialCollection(
+        candidate
+      );
+
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+
+  return [];
+}
+
+function getReadableDeliveredItems(
+  storedItems,
+  providerResponse
+) {
+  const stored =
+    normalizeCredentialCollection(
+      storedItems
+    );
+
+  const storedHasPlaceholder =
+    (
+      Array.isArray(storedItems)
+        ? storedItems
+        : []
+    ).some(
+      (item) =>
+        String(item || "")
+          .trim() ===
+        "[object Object]"
+    );
+
+  if (
+    stored.length > 0 &&
+    !storedHasPlaceholder
+  ) {
+    return stored;
+  }
+
+  const recovered =
+    extractDeliveredItems(
+      providerResponse
+    );
+
+  return recovered.length > 0
+    ? recovered
+    : stored;
+}
+
 function slugify(value) {
   return normalizeText(value)
     .toLowerCase()
@@ -954,18 +1217,9 @@ async function purchaseFromProvider(
         ),
 
       deliveredItems:
-        Array.isArray(
-          data?.keys
-        )
-          ? data.keys
-              .map(
-                (item) =>
-                  normalizeText(
-                    item
-                  )
-              )
-              .filter(Boolean)
-          : [],
+        extractDeliveredItems(
+          data
+        ),
 
       raw: data,
     };
@@ -981,13 +1235,6 @@ async function purchaseFromProvider(
           .providerProductId,
         quantity
       );
-
-    const delivered =
-      Array.isArray(
-        data?.delivered
-      )
-        ? data.delivered
-        : [];
 
     return {
       providerOrderId:
@@ -1005,18 +1252,9 @@ async function purchaseFromProvider(
         ),
 
       deliveredItems:
-        delivered
-          .map(
-            (item) =>
-              normalizeText(
-                typeof item ===
-                  "string"
-                  ? item
-                  : item
-                      ?.details
-              )
-          )
-          .filter(Boolean),
+        extractDeliveredItems(
+          data
+        ),
 
       raw: data,
     };
@@ -1718,11 +1956,10 @@ function sanitizeOrder(
       "processing",
 
     deliveredItems:
-      Array.isArray(
-        data?.deliveredItems
-      )
-        ? data.deliveredItems
-        : [],
+      getReadableDeliveredItems(
+        data?.deliveredItems,
+        data?.providerResponse
+      ),
 
     refunded:
       Boolean(
@@ -3384,14 +3621,11 @@ exports.buySocialProduct =
         );
 
       const deliveredItems =
-        Array.isArray(
+        getReadableDeliveredItems(
           purchaseResult
-            .deliveredItems
-        )
-          ? purchaseResult
-              .deliveredItems
-              .filter(Boolean)
-          : [];
+            .deliveredItems,
+          purchaseResult.raw
+        );
 
       /*
        * Provider said success but returned
