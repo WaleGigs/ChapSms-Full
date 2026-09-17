@@ -31,7 +31,7 @@ const PROVIDERS = {
 };
 
 const DEFAULT_CATALOG_TTL_MS =
-  15 * 1000;
+  60 * 1000;
 
 const DEFAULT_REQUEST_TIMEOUT_MS =
   20 * 1000;
@@ -163,57 +163,6 @@ function positiveInteger(
     : fallback;
 }
 
-function normalizeAvailabilityFlag(value) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 0;
-  }
-
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const normalized = String(value)
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ");
-
-  if (!normalized) {
-    return null;
-  }
-
-  if ([
-    "false",
-    "0",
-    "no",
-    "off",
-    "out of stock",
-    "unavailable",
-    "sold out",
-    "disabled",
-  ].includes(normalized)) {
-    return false;
-  }
-
-  if ([
-    "true",
-    "1",
-    "yes",
-    "on",
-    "in stock",
-    "available",
-    "enabled",
-  ].includes(normalized)) {
-    return true;
-  }
-
-  return null;
-}
-
 function normalizeCurrency(
   value
 ) {
@@ -233,7 +182,7 @@ function getCatalogTtlMs() {
   return Number.isFinite(
     configured
   ) &&
-    configured >= 5_000
+    configured >= 10_000
     ? configured
     : DEFAULT_CATALOG_TTL_MS;
 }
@@ -761,34 +710,10 @@ async function getSameehaProducts() {
           config.currency
         );
 
-      const availability =
-        normalizeAvailabilityFlag(
-          product?.in_stock ??
-          product?.inStock ??
-          product?.available ??
-          product?.availability ??
-          product?.status
+      const stock =
+        positiveNumber(
+          product?.stock
         );
-
-      const rawStock =
-        product?.stock ??
-        product?.quantity ??
-        product?.available_stock;
-
-      const hasStockField =
-        rawStock !== undefined &&
-        rawStock !== null &&
-        rawStock !== "";
-
-      let stock = hasStockField
-        ? positiveNumber(rawStock)
-        : availability === true
-          ? 1
-          : 0;
-
-      if (availability === false) {
-        stock = 0;
-      }
 
       const category =
         categories.get(
@@ -824,11 +749,9 @@ async function getSameehaProducts() {
         stock,
 
         inStock:
-          availability === false
-            ? false
-            : availability === true
-              ? stock > 0
-              : stock > 0,
+          product?.in_stock ===
+          true ||
+          stock > 0,
       };
     })
     .filter(
@@ -1104,32 +1027,140 @@ async function purchaseFromProvider(
   );
 }
 
+
+async function loadProviderProductsSafely(
+  provider,
+  loader
+) {
+  try {
+    const products =
+      await loader();
+
+    return {
+      provider,
+      ok: true,
+      products:
+        Array.isArray(products)
+          ? products
+          : [],
+      error: null,
+    };
+  } catch (error) {
+    console.error(
+      `[social] ${provider} catalog request failed:`,
+      {
+        message:
+          error?.message ||
+          "Unknown provider error",
+        providerHttpStatus:
+          error?.providerHttpStatus,
+        providerCode:
+          error?.providerCode,
+      }
+    );
+
+    return {
+      provider,
+      ok: false,
+      products: [],
+      error,
+    };
+  }
+}
+
 /* =========================================================
    CATALOG SYNC
 ========================================================= */
 
 async function refreshCatalog() {
-  assertProviderKeys();
-
   /*
-   * Both must return successfully before we
-   * overwrite the normalized cache.
+   * IMPORTANT:
+   * Providers are isolated from each other.
    *
-   * This prevents a temporary provider outage
-   * from accidentally deleting half the store.
+   * LoggsPlug is currently capable of returning a Cloudflare
+   * HTTP 403 challenge from Render. That must NOT stop Sameeha
+   * products from refreshing or being purchased.
+   *
+   * Likewise, a Sameeha outage must not take LoggsPlug down.
    */
-  const [
-    sameehaProducts,
-    loggsplugProducts,
-  ] = await Promise.all([
-    getSameehaProducts(),
-    getLoggsplugProducts(),
-  ]);
+  const sameehaConfig =
+    getSameehaConfig();
 
-  const combined = [
-    ...sameehaProducts,
-    ...loggsplugProducts,
-  ];
+  const loggsplugConfig =
+    getLoggsplugConfig();
+
+  const providerJobs = [];
+
+  if (sameehaConfig.apiKey) {
+    providerJobs.push(
+      loadProviderProductsSafely(
+        PROVIDERS.SAMEEHA,
+        getSameehaProducts
+      )
+    );
+  } else {
+    console.error(
+      "[social] SAMEEHA_API_KEY is missing; Sameeha refresh skipped."
+    );
+  }
+
+  if (loggsplugConfig.apiKey) {
+    providerJobs.push(
+      loadProviderProductsSafely(
+        PROVIDERS.LOGGSPLUG,
+        getLoggsplugProducts
+      )
+    );
+  } else {
+    console.error(
+      "[social] LOGGSPLUG_API_KEY is missing; LoggsPlug refresh skipped."
+    );
+  }
+
+  if (providerJobs.length === 0) {
+    throw new Error(
+      "No social provider API keys are configured"
+    );
+  }
+
+  const providerResults =
+    await Promise.all(
+      providerJobs
+    );
+
+  const successfulResults =
+    providerResults.filter(
+      (result) =>
+        result.ok
+    );
+
+  if (
+    successfulResults.length ===
+    0
+  ) {
+    /*
+     * Every provider failed. Keep the existing cached catalog
+     * untouched instead of replacing it with an empty catalog.
+     */
+    const firstError =
+      providerResults.find(
+        (result) =>
+          result.error
+      )?.error;
+
+    throw (
+      firstError ||
+      new Error(
+        "All social providers are unavailable"
+      )
+    );
+  }
+
+  const combined =
+    successfulResults.flatMap(
+      (result) =>
+        result.products
+    );
 
   const grouped =
     new Map();
@@ -2661,21 +2692,54 @@ async function getLiveCandidates(
    * House stock never comes through here.
    */
   const [
-    sameeha,
-    loggsplug,
+    sameehaResult,
+    loggsplugResult,
     hiddenRuleKeys,
     pricingIndex,
   ] = await Promise.all([
-    getSameehaProducts(),
-    getLoggsplugProducts(),
+    loadProviderProductsSafely(
+      PROVIDERS.SAMEEHA,
+      getSameehaProducts
+    ),
+
+    loadProviderProductsSafely(
+      PROVIDERS.LOGGSPLUG,
+      getLoggsplugProducts
+    ),
+
     loadHiddenSocialRuleKeys(),
-    socialPricingService.loadPricingIndex(),
+
+    socialPricingService
+      .loadPricingIndex(),
   ]);
 
+  /*
+   * A failed LoggsPlug request must not prevent a Sameeha
+   * purchase, and vice versa.
+   */
   const liveProducts = [
-    ...sameeha,
-    ...loggsplug,
+    ...(sameehaResult.ok
+      ? sameehaResult.products
+      : []),
+
+    ...(loggsplugResult.ok
+      ? loggsplugResult.products
+      : []),
   ];
+
+  if (
+    liveProducts.length ===
+    0
+  ) {
+    const error =
+      sameehaResult.error ||
+      loggsplugResult.error ||
+      new Error(
+        "Social providers are temporarily unavailable"
+      );
+
+    throw error;
+  }
 
   const allowed =
     new Set(
@@ -3076,15 +3140,6 @@ exports.buySocialProduct =
         candidates.length ===
         0
       ) {
-        /*
-         * The live provider check is newer than the cached catalog.
-         * Refresh the public cache now so customers immediately see
-         * Out of Stock instead of repeatedly attempting the item.
-         */
-        await refreshCatalog().catch((refreshError) => {
-          console.error("Unable to refresh out-of-stock social item:", refreshError);
-        });
-
         return res
           .status(409)
           .json({
@@ -3422,11 +3477,6 @@ exports.buySocialProduct =
         );
       }
 
-      /* Keep customer stock in sync immediately after a provider sale. */
-      await refreshCatalog().catch((refreshError) => {
-        console.error("Post-purchase social catalog refresh failed:", refreshError);
-      });
-
       return res
         .status(
           finalStatus ===
@@ -3618,24 +3668,6 @@ exports.buySocialProduct =
               error
                 .walletBalance,
           });
-      }
-
-      const providerRejectedForStock =
-        error?.providerHttpStatus === 409 ||
-        /out\s*of\s*stock|not\s*enough\s*(keys|stock)|insufficient\s*stock/i.test(
-          String(error?.message || "")
-        );
-
-      if (providerRejectedForStock) {
-        await refreshCatalog().catch(() => null);
-
-        return res.status(409).json({
-          success: false,
-          code: "SOCIAL_OUT_OF_STOCK",
-          message: "This product is currently out of stock. Please try another product.",
-          refunded: Boolean(refundWallet),
-          walletBalance: refundWallet ? Number(refundWallet.balance || 0) : undefined,
-        });
       }
 
       return res
