@@ -1333,24 +1333,35 @@ async function refreshCatalog() {
 
         {
           upsert: true,
-          new: true,
+          returnDocument: "after",
           setDefaultsOnInsert:
             true,
         }
       );
   }
 
+  /*
+   * IMPORTANT:
+   * Only deactivate products for providers that actually
+   * refreshed successfully in this cycle.
+   *
+   * If LoggsPlug is blocked/unavailable while Sameeha succeeds,
+   * we must NOT deactivate cached LoggsPlug products.
+   */
+  const refreshedProviders =
+    successfulResults.map(
+      (result) => result.provider
+    );
+
   if (
-    seenKeys.length > 0
+    seenKeys.length > 0 &&
+    refreshedProviders.length > 0
   ) {
     await SocialProduct
       .updateMany(
         {
           provider: {
-            $in: [
-              PROVIDERS.SAMEEHA,
-              PROVIDERS.LOGGSPLUG,
-            ],
+            $in: refreshedProviders,
           },
 
           catalogKey: {
@@ -1807,7 +1818,7 @@ async function reserveWallet({
         },
 
         {
-          new: true,
+          returnDocument: "after",
           runValidators: true,
         }
       );
@@ -1886,7 +1897,7 @@ async function completeWalletReservation({
       },
 
       {
-        new: true,
+        returnDocument: "after",
 
         runValidators:
           true,
@@ -1951,7 +1962,7 @@ async function refundWalletReservation({
         },
 
         {
-          new: true,
+          returnDocument: "after",
 
           runValidators:
             true,
@@ -2037,7 +2048,7 @@ async function refundWalletReservation({
         },
 
         {
-          new: true,
+          returnDocument: "after",
           runValidators: true,
         }
       );
@@ -2277,7 +2288,7 @@ async function buyHouseStockProduct({
             },
 
             {
-              new: true,
+              returnDocument: "after",
               sort: {
                 createdAt: 1,
               },
