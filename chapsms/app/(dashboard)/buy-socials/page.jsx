@@ -532,7 +532,7 @@ export default function BuySocialsPage() {
   return (
     <div className="mx-auto min-w-0 w-full max-w-[1080px] overflow-x-hidden text-[var(--foreground)]">
       <div className="mb-6 sm:mb-8">
-        <h1 className="text-[26px] font-black leading-tight tracking-tight min-[390px]:text-[28px] sm:text-4xl">Buysssssss Account & VPNs</h1>
+        <h1 className="text-[26px] font-black leading-tight tracking-tight min-[390px]:text-[28px] sm:text-4xl">Buy Account & VPNs</h1>
         <p className="mt-2.5 max-w-xl text-[13px] leading-[22px] text-[var(--muted-foreground)] sm:text-base sm:leading-7">Instant delivery. Credentials appear right after payment from your NGN wallet.</p>
         <button type="button" onClick={refreshCatalog} disabled={refreshing} className="mt-4 flex h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 text-[13px] font-black transition hover:bg-[var(--muted)] disabled:opacity-50 sm:h-12 sm:px-5 sm:text-sm">
           <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} /> Refresh
