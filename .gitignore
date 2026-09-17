@@ -1,0 +1,19 @@
+.DS_Store
+
+# Dependencies
+**/node_modules/
+
+# Next.js
+**/.next/
+
+# Environment secrets
+**/.env
+**/.env.*
+!**/.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Archives
+*.zip
