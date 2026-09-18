@@ -35,6 +35,8 @@ function getErrorMessage(error) {
     INSUFFICIENT_WALLET_BALANCE:
       "Your ChapsSms wallet balance is too low for this purchase.",
     SOCIAL_OUT_OF_STOCK: "This product is currently out of stock.",
+    SOCIAL_PROVIDER_UNAVAILABLE:
+      "This supplier is temporarily unavailable. Please try again shortly.",
     SOCIAL_PRODUCT_NOT_FOUND: "This product is no longer available.",
     SOCIAL_PURCHASE_REQUIRES_LIVE_MODE:
       "Buy Account & VPNs is temporarily unavailable while payment testing is enabled.",
@@ -438,7 +440,7 @@ export default function BuySocialsPage() {
 
   useEffect(() => {
     loadCatalog();
-    const timer = window.setInterval(() => loadCatalog({ silent: true }), 15000);
+    const timer = window.setInterval(() => loadCatalog({ silent: true }), 60000);
     return () => window.clearInterval(timer);
   }, [loadCatalog]);
 
@@ -517,12 +519,36 @@ export default function BuySocialsPage() {
       setQuantity(1);
     } catch (error) {
       const code = getErrorCode(error);
-      try { await refreshWallet?.(); } catch {}
-      if (code === "SOCIAL_OUT_OF_STOCK" || /out of stock/i.test(getErrorMessage(error))) {
-        setProducts((current) => current.map((item) => item.id === selectedProduct?.id ? { ...item, stock: 0, inStock: false } : item));
+
+      try {
+        await refreshWallet?.();
+      } catch {}
+
+      /*
+       * Never force stock to zero from the browser.
+       *
+       * A slow or blocked provider request can fail even when the
+       * provider still has stock. The backend/provider is the source
+       * of truth for the real stock state.
+       */
+      if (code === "SOCIAL_OUT_OF_STOCK") {
         setSelectedProduct(null);
+
+        /*
+         * Ask the backend for the latest catalog instead of writing
+         * stock: 0 locally.
+         */
         await loadCatalog({ silent: true });
       }
+
+      if (code === "SOCIAL_PROVIDER_UNAVAILABLE") {
+        /*
+         * Keep the cached stock exactly as it was.
+         * Do not turn the card into "Out of Stock".
+         */
+        setSelectedProduct(null);
+      }
+
       toast.error(getErrorMessage(error));
     } finally {
       setPurchasing(false);
@@ -544,25 +570,10 @@ export default function BuySocialsPage() {
           <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]" />
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search accounts, VPNs & tools..." className="h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] pl-10 pr-3.5 text-[14px] font-medium text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)] focus:border-blue-500 sm:h-14 sm:text-base" />
         </div>
-        <div className="relative">
-          <select
-            value={selectedCategory}
-            onChange={(event) => setSelectedCategory(event.target.value)}
-            className="h-12 w-full appearance-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-3.5 pr-11 text-[14px] font-semibold text-[var(--foreground)] outline-none focus:border-blue-500 [color-scheme:light] dark:[color-scheme:dark] sm:h-14 sm:px-4 sm:pr-12 sm:text-base"
-          >
-            <option value="all">All</option>
-            {sortedCategories.map((category) => (
-              <option key={category} value={category}>
-                {customerCategoryName(category)}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            aria-hidden="true"
-            size={18}
-            className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[var(--foreground)]"
-          />
-        </div>
+        <select value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)} className="h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3.5 text-[14px] font-semibold text-[var(--foreground)] outline-none focus:border-blue-500 [color-scheme:light] dark:[color-scheme:dark] sm:h-14 sm:px-4 sm:text-base">
+          <option value="all">All</option>
+          {sortedCategories.map((category) => <option key={category} value={category}>{customerCategoryName(category)}</option>)}
+        </select>
       </div>
 
       <p className="mt-5 text-[13px] text-[var(--muted-foreground)] sm:mt-6 sm:text-base">Showing {filteredProducts.length.toLocaleString("en-NG")} products</p>
