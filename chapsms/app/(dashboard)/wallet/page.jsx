@@ -9,7 +9,6 @@ import {
   LoaderCircle,
   RefreshCw,
   ShieldCheck,
-  XCircle,
   Zap,
 } from "lucide-react";
 
@@ -82,7 +81,6 @@ export default function WalletPage() {
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [checkingBalance, setCheckingBalance] = useState(false);
   const [neurapayLoaded, setNeurapayLoaded] = useState(false);
-  const [neurapayFundingActive, setNeurapayFundingActive] = useState(true);
 
   const checkoutTrackedRef = useRef(new Set());
   const numericAmount = useMemo(() => Number(amount) || 0, [amount]);
@@ -115,7 +113,7 @@ export default function WalletPage() {
   }, [neurapayLoaded, loadNeuraPayAccount]);
 
   useEffect(() => {
-    if (!account || !neurapayFundingActive) return undefined;
+    if (!account) return undefined;
 
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") {
@@ -124,17 +122,17 @@ export default function WalletPage() {
     }, 12000);
 
     return () => window.clearInterval(interval);
-  }, [account, neurapayFundingActive, refreshWallet]);
+  }, [account, refreshWallet]);
 
   useEffect(() => {
-    if (!account || !neurapayFundingActive || numericAmount < 100) return;
+    if (!account || numericAmount < 100) return;
 
     trackCheckoutOnce(`neurapay:${numericAmount}`, {
       value: numericAmount,
       currency: "NGN",
       description: "ChapsSms NeuraPay bank-transfer funding started",
     });
-  }, [account, neurapayFundingActive, numericAmount]);
+  }, [account, numericAmount]);
 
   async function handleCreateNeuraPayAccount() {
     if (creatingAccount) return;
@@ -156,7 +154,6 @@ export default function WalletPage() {
       }
 
       setAccount(nextAccount);
-      setNeurapayFundingActive(true);
 
       trackCheckoutOnce(`neurapay:${numericAmount}`, {
         value: numericAmount,
@@ -196,19 +193,6 @@ export default function WalletPage() {
     }
   }
 
-  function handleCancelNeuraPayFunding() {
-    setNeurapayFundingActive(false);
-    toast("Funding session cancelled. No money was moved by ChapsSms.");
-  }
-
-  function handleStartFundingAgain() {
-    if (!Number.isFinite(numericAmount) || numericAmount < 100) {
-      toast.error("Minimum funding amount is ₦100");
-      return;
-    }
-
-    setNeurapayFundingActive(true);
-  }
 
   return (
     <div className="mx-auto w-full max-w-5xl">
@@ -287,19 +271,7 @@ export default function WalletPage() {
           </div>
         </div>
 
-        {!neurapayFundingActive ? (
-          <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-5 text-center">
-            <XCircle size={30} className="mx-auto text-[var(--muted-foreground)]" />
-            <p className="mt-3 font-black text-[var(--foreground)]">NeuraPay funding cancelled</p>
-            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
-              Your reserved account is still available. No ChapsSms wallet transaction was created.
-            </p>
-            <Button type="button" className="mt-5 h-12 w-full" onClick={handleStartFundingAgain}>
-              <Landmark size={18} />
-              Start funding again
-            </Button>
-          </div>
-        ) : accountLoading ? (
+        {accountLoading ? (
           <div className="mt-6 flex min-h-44 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
             <div className="text-center">
               <LoaderCircle size={28} className="mx-auto animate-spin text-blue-600" />
@@ -340,11 +312,7 @@ export default function WalletPage() {
               </div>
             </div>
 
-            <div className="mt-4 rounded-xl bg-amber-500/10 px-4 py-3 text-xs font-semibold leading-5 text-amber-700 dark:text-amber-300">
-              Cancel funding only closes this ChapsSms funding session. It cannot reverse a bank transfer you have already sent. If you already transferred money, allow NeuraPay to verify it so your wallet can be credited.
-            </div>
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <div className="mt-5">
               <Button
                 type="button"
                 className="h-14 w-full"
@@ -358,15 +326,6 @@ export default function WalletPage() {
                 )}
                 {checkingBalance ? "Checking balance..." : "I have paid — check wallet"}
               </Button>
-
-              <button
-                type="button"
-                onClick={handleCancelNeuraPayFunding}
-                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-500/5 px-4 text-sm font-black text-red-600 transition hover:bg-red-500/10 dark:text-red-300"
-              >
-                <XCircle size={19} />
-                Cancel funding
-              </button>
             </div>
           </div>
         ) : (
@@ -390,15 +349,6 @@ export default function WalletPage() {
               )}
               {creatingAccount ? "Creating secure account..." : "Generate NeuraPay account"}
             </Button>
-
-            <button
-              type="button"
-              onClick={handleCancelNeuraPayFunding}
-              className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-transparent px-4 text-sm font-black text-red-600 transition hover:bg-red-500/5 dark:text-red-300"
-            >
-              <XCircle size={18} />
-              Cancel funding
-            </button>
           </div>
         )}
 
