@@ -30,6 +30,39 @@ const PROVIDERS = {
   HOUSE: "house",
 };
 
+/*
+ * Temporary provider switch.
+ * Keep LoggsPlug integration in the codebase, but do not expose,
+ * refresh, or purchase from it unless explicitly re-enabled.
+ */
+const ENABLE_LOGGSPLUG =
+  String(
+    process.env.ENABLE_LOGGSPLUG ||
+      "false"
+  )
+    .trim()
+    .toLowerCase() === "true";
+
+function getEnabledExternalProviders() {
+  return ENABLE_LOGGSPLUG
+    ? [
+        PROVIDERS.SAMEEHA,
+        PROVIDERS.LOGGSPLUG,
+      ]
+    : [PROVIDERS.SAMEEHA];
+}
+
+function isCustomerProviderEnabled(
+  provider
+) {
+  return getEnabledExternalProviders()
+    .includes(
+      String(provider || "")
+        .trim()
+        .toLowerCase()
+    );
+}
+
 const DEFAULT_CATALOG_TTL_MS =
   60 * 1000;
 
@@ -1342,17 +1375,19 @@ async function refreshCatalog() {
     );
   }
 
-  if (loggsplugConfig.apiKey) {
-    providerJobs.push(
-      loadProviderProductsSafely(
-        PROVIDERS.LOGGSPLUG,
-        getLoggsplugProducts
-      )
-    );
-  } else {
-    console.error(
-      "[social] LOGGSPLUG_API_KEY is missing; LoggsPlug refresh skipped."
-    );
+  if (ENABLE_LOGGSPLUG) {
+    if (loggsplugConfig.apiKey) {
+      providerJobs.push(
+        loadProviderProductsSafely(
+          PROVIDERS.LOGGSPLUG,
+          getLoggsplugProducts
+        )
+      );
+    } else {
+      console.error(
+        "[social] LOGGSPLUG_API_KEY is missing; LoggsPlug refresh skipped."
+      );
+    }
   }
 
   if (providerJobs.length === 0) {
@@ -1831,6 +1866,12 @@ function sanitizeProductForCustomer(
   }
 
   const enabled = getCachedProviderCandidates(product)
+    .filter(
+      (candidate) =>
+        isCustomerProviderEnabled(
+          candidate.provider
+        )
+    )
     .filter(
       (candidate) =>
         !isProviderCandidateHidden(
@@ -2934,11 +2975,27 @@ async function getLiveCandidates(
   quantity
 ) {
   /*
-   * Refresh both provider product lists
+   * Refresh enabled provider product lists
    * immediately before purchase.
    *
+   * LoggsPlug is disabled by default for now, so Sameeha
+   * is the only external provider used unless re-enabled.
    * House stock never comes through here.
    */
+  const loggsplugPromise =
+    ENABLE_LOGGSPLUG
+      ? loadProviderProductsSafely(
+          PROVIDERS.LOGGSPLUG,
+          getLoggsplugProducts
+        )
+      : Promise.resolve({
+          provider:
+            PROVIDERS.LOGGSPLUG,
+          ok: false,
+          products: [],
+          error: null,
+        });
+
   const [
     sameehaResult,
     loggsplugResult,
@@ -2950,10 +3007,7 @@ async function getLiveCandidates(
       getSameehaProducts
     ),
 
-    loadProviderProductsSafely(
-      PROVIDERS.LOGGSPLUG,
-      getLoggsplugProducts
-    ),
+    loggsplugPromise,
 
     loadHiddenSocialRuleKeys(),
 
@@ -2962,8 +3016,8 @@ async function getLiveCandidates(
   ]);
 
   /*
-   * A failed LoggsPlug request must not prevent a Sameeha
-   * purchase, and vice versa.
+   * Only enabled providers contribute live products.
+   * With ENABLE_LOGGSPLUG=false, this is Sameeha only.
    */
   const liveProducts = [
     ...(sameehaResult.ok
@@ -3010,6 +3064,12 @@ async function getLiveCandidates(
   );
 
   return liveProducts
+    .filter(
+      (item) =>
+        isCustomerProviderEnabled(
+          item.provider
+        )
+    )
     .filter(
       (item) =>
         allowed.has(
@@ -3069,10 +3129,8 @@ exports.getCatalog =
         await SocialProduct
           .findOne({
             provider: {
-              $in: [
-                PROVIDERS.SAMEEHA,
-                PROVIDERS.LOGGSPLUG,
-              ],
+              $in:
+                getEnabledExternalProviders(),
             },
 
             isActive: true,
@@ -3128,11 +3186,13 @@ exports.getCatalog =
       const hasProviderProduct =
         products.some(
           (product) =>
-            [
-              PROVIDERS.SAMEEHA,
-              PROVIDERS.LOGGSPLUG,
-            ].includes(
-              product.provider
+            getCachedProviderCandidates(
+              product
+            ).some(
+              (candidate) =>
+                isCustomerProviderEnabled(
+                  candidate.provider
+                )
             )
         );
 

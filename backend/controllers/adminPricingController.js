@@ -1793,12 +1793,112 @@ exports.getPayments = async (req, res) => {
             },
           ]
         : []),
+
+    {
+  $facet: {
+    rows: [
       {
         $sort: {
-          "transactions.createdAt":
-            -1,
+          "transactions.createdAt": -1,
         },
       },
+      {
+        $skip: (page - 1) * limit,
+      },
+      {
+        $limit: limit,
+      },
+      {
+        $project: {
+          _id: 0,
+
+          id: {
+            $toString: "$transactions._id",
+          },
+
+          walletId: {
+            $toString: "$_id",
+          },
+
+          userId: {
+            $toString: "$user",
+          },
+
+          customer: {
+            username: "$customer.username",
+            firstName: "$customer.firstName",
+            lastName: "$customer.lastName",
+            email: "$customer.email",
+          },
+
+          type: "$transactions.type",
+          amount: "$transactions.amount",
+          status: "$transactions.status",
+          reference: "$transactions.reference",
+          transactionId: "$transactions.transactionId",
+          gateway: "$transactions.paymentGateway",
+          method: "$transactions.paymentMethod",
+          description: "$transactions.description",
+
+          server: {
+            $ifNull: [
+              "$transactions.server",
+              "$linkedOrder.server",
+            ],
+          },
+
+          orderId: {
+            $cond: [
+              {
+                $ne: [
+                  "$transactions.orderId",
+                  null,
+                ],
+              },
+              {
+                $toString:
+                  "$transactions.orderId",
+              },
+              null,
+            ],
+          },
+
+          service:
+            "$linkedOrder.service",
+
+          country:
+            "$linkedOrder.country",
+
+          serviceName: {
+            $ifNull: [
+              "$transactions.serviceName",
+              "$linkedOrder.serviceName",
+            ],
+          },
+
+          countryName: {
+            $ifNull: [
+              "$transactions.countryName",
+              "$linkedOrder.countryName",
+            ],
+          },
+
+          environment:
+            "$transactions.environment",
+
+          createdAt:
+            "$transactions.createdAt",
+        },
+      },
+    ],
+
+    meta: [
+      {
+        $count: "total",
+      },
+    ],
+  },
+},
       {
         $facet: {
           rows: [
@@ -1907,9 +2007,9 @@ exports.getPayments = async (req, res) => {
     ];
 
     const [result] =
-      await Wallet.aggregate(
-        pipeline
-      );
+  await Wallet.aggregate(
+    pipeline
+  ).allowDiskUse(true);
 
     const payments =
       result?.rows || [];
