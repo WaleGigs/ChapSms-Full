@@ -4,6 +4,9 @@ const User = require("../models/User");
 const Order = require("../models/Order");
 const Wallet = require("../models/Wallet");
 const Payment = require("../models/Payment");
+const pricingService = require(
+  "../services/pricingService"
+);
 
 const { protect } = require("../middleware/authMiddleware");
 const adminOnly = require("../middleware/adminMiddleware");
@@ -70,6 +73,156 @@ function sanitizeOrder(order) {
 
 function sanitizeOrders(orders) {
   return orders.map((order) => sanitizeOrder(order));
+}
+
+async function getUserFinancialSummaries(userIds = []) {
+  if (!userIds.length) {
+    return new Map();
+  }
+
+  const rows = await Wallet.aggregate([
+    {
+      $match: {
+        user: {
+          $in: userIds,
+        },
+      },
+    },
+    {
+      $project: {
+        user: 1,
+        balance: {
+          $ifNull: ["$balance", 0],
+        },
+        totalDeposited: {
+          $sum: {
+            $map: {
+              input: {
+                $filter: {
+                  input: {
+                    $ifNull: ["$transactions", []],
+                  },
+                  as: "transaction",
+                  cond: {
+                    $and: [
+                      {
+                        $eq: [
+                          {
+                            $toLower: {
+                              $ifNull: [
+                                "$$transaction.type",
+                                "",
+                              ],
+                            },
+                          },
+                          "deposit",
+                        ],
+                      },
+                      {
+                        $eq: [
+                          {
+                            $toLower: {
+                              $ifNull: [
+                                "$$transaction.status",
+                                "",
+                              ],
+                            },
+                          },
+                          "completed",
+                        ],
+                      },
+                      {
+                        $or: [
+                          {
+                            $in: [
+                              {
+                                $toLower: {
+                                  $ifNull: [
+                                    "$$transaction.paymentGateway",
+                                    "",
+                                  ],
+                                },
+                              },
+                              [
+                                "neurapay",
+                                "flutterwave",
+                              ],
+                            ],
+                          },
+                          {
+                            $regexMatch: {
+                              input: {
+                                $ifNull: [
+                                  "$$transaction.description",
+                                  "",
+                                ],
+                              },
+                              regex:
+                                "^(NeuraPay|Flutterwave).*wallet funding",
+                              options: "i",
+                            },
+                          },
+                        ],
+                      },
+                      {
+                        $or: [
+                          {
+                            $eq: [
+                              {
+                                $ifNull: [
+                                  "$$transaction.environment",
+                                  "",
+                                ],
+                              },
+                              "",
+                            ],
+                          },
+                          {
+                            $eq: [
+                              {
+                                $toLower: {
+                                  $ifNull: [
+                                    "$$transaction.environment",
+                                    "",
+                                  ],
+                                },
+                              },
+                              "live",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+              as: "transaction",
+              in: {
+                $convert: {
+                  input: "$$transaction.amount",
+                  to: "double",
+                  onError: 0,
+                  onNull: 0,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  ]);
+
+  return new Map(
+    rows.map((row) => [
+      String(row.user),
+      {
+        currentBalance:
+          Number(row.balance || 0),
+        totalDeposited:
+          Number(row.totalDeposited || 0),
+      },
+    ])
+  );
 }
 
 /*
@@ -187,11 +340,39 @@ router.get("/users", async (req, res) => {
       )
       .sort({
         createdAt: -1,
+      })
+      .lean();
+
+    const financialSummaries =
+      await getUserFinancialSummaries(
+        users.map((user) => user._id)
+      );
+
+    const usersWithWalletStats =
+      users.map((user) => {
+        const summary =
+          financialSummaries.get(
+            String(user._id)
+          ) || {
+            currentBalance: 0,
+            totalDeposited: 0,
+          };
+
+        return {
+          ...user,
+          wallet: summary.currentBalance,
+          walletBalance:
+            summary.currentBalance,
+          currentBalance:
+            summary.currentBalance,
+          totalDeposited:
+            summary.totalDeposited,
+        };
       });
 
     return res.status(200).json({
       success: true,
-      users,
+      users: usersWithWalletStats,
     });
   } catch (error) {
     console.error(
@@ -484,6 +665,153 @@ router.delete(
           error.message ||
           "Unable to delete user",
       });
+    }
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
+| Global number pricing settings
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/pricing-settings",
+  async (req, res) => {
+    try {
+      const [
+        exchangeRate,
+        defaultMinimumPrice,
+      ] = await Promise.all([
+        pricingService.getExchangeRate({
+          forceRefresh: true,
+        }),
+        pricingService.getDefaultMinimumPrice({
+          forceRefresh: true,
+        }),
+      ]);
+
+      return res.status(200).json({
+        success: true,
+        settings: {
+          exchangeRate:
+            Number(exchangeRate.rate || 0),
+          exchangeRateUpdatedAt:
+            exchangeRate.updatedAt || null,
+          defaultMinimumPrice:
+            Number(
+              defaultMinimumPrice.amount || 0
+            ),
+          defaultMinimumPriceUpdatedAt:
+            defaultMinimumPrice.updatedAt ||
+            null,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Admin pricing settings load error:",
+        error
+      );
+
+      return res
+        .status(error.status || 500)
+        .json({
+          success: false,
+          message:
+            error.message ||
+            "Unable to load pricing settings",
+          code:
+            error.code ||
+            "PRICING_SETTINGS_LOAD_FAILED",
+        });
+    }
+  }
+);
+
+router.patch(
+  "/pricing-settings",
+  async (req, res) => {
+    try {
+      const hasExchangeRate =
+        req.body?.exchangeRate !==
+        undefined;
+
+      const hasMinimumPrice =
+        req.body?.defaultMinimumPrice !==
+        undefined;
+
+      if (
+        !hasExchangeRate &&
+        !hasMinimumPrice
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Send exchangeRate or defaultMinimumPrice",
+        });
+      }
+
+      if (hasExchangeRate) {
+        await pricingService.setExchangeRate(
+          req.body.exchangeRate,
+          req.user?._id || null
+        );
+      }
+
+      if (hasMinimumPrice) {
+        await pricingService.setDefaultMinimumPrice(
+          req.body.defaultMinimumPrice,
+          req.user?._id || null
+        );
+      }
+
+      const [
+        exchangeRate,
+        defaultMinimumPrice,
+      ] = await Promise.all([
+        pricingService.getExchangeRate({
+          forceRefresh: true,
+        }),
+        pricingService.getDefaultMinimumPrice({
+          forceRefresh: true,
+        }),
+      ]);
+
+      return res.status(200).json({
+        success: true,
+        settings: {
+          exchangeRate:
+            Number(exchangeRate.rate || 0),
+          exchangeRateUpdatedAt:
+            exchangeRate.updatedAt || null,
+          defaultMinimumPrice:
+            Number(
+              defaultMinimumPrice.amount || 0
+            ),
+          defaultMinimumPriceUpdatedAt:
+            defaultMinimumPrice.updatedAt ||
+            null,
+        },
+        message:
+          "Pricing settings updated successfully",
+      });
+    } catch (error) {
+      console.error(
+        "Admin pricing settings update error:",
+        error
+      );
+
+      return res
+        .status(error.status || 500)
+        .json({
+          success: false,
+          message:
+            error.message ||
+            "Unable to update pricing settings",
+          code:
+            error.code ||
+            "PRICING_SETTINGS_UPDATE_FAILED",
+        });
     }
   }
 );

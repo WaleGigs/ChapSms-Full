@@ -16,8 +16,21 @@ const EXCHANGE_RATE_SETTING_KEY = "pricing.ngn_per_usd";
 const DEFAULT_NGN_PER_USD = 1600;
 const EXCHANGE_RATE_CACHE_TTL_MS = 60 * 1000;
 
+const DEFAULT_MINIMUM_PRICE_SETTING_KEY =
+  "pricing.default_minimum_number_price_ngn";
+const DEFAULT_MINIMUM_NUMBER_PRICE_NGN = 1000;
+const DEFAULT_MINIMUM_PRICE_CACHE_TTL_MS =
+  60 * 1000;
+
 let exchangeRateCache = {
   rate: null,
+  updatedAt: null,
+  source: null,
+  expiresAt: 0,
+};
+
+let defaultMinimumPriceCache = {
+  amount: null,
   updatedAt: null,
   source: null,
   expiresAt: 0,
@@ -112,6 +125,29 @@ function getCachedExchangeRateValue() {
   }
 
   return getEnvironmentExchangeRate();
+}
+
+function getEnvironmentDefaultMinimumPrice() {
+  const configured = Number(
+    process.env.AUTO_PRICING_MINIMUM_NGN
+  );
+
+  return Number.isFinite(configured) &&
+    configured > 0
+    ? configured
+    : DEFAULT_MINIMUM_NUMBER_PRICE_NGN;
+}
+
+function getCachedDefaultMinimumPriceValue() {
+  const cached = Number(
+    defaultMinimumPriceCache.amount
+  );
+
+  if (Number.isFinite(cached) && cached > 0) {
+    return cached;
+  }
+
+  return getEnvironmentDefaultMinimumPrice();
 }
 
 function getSettingsCollection() {
@@ -255,6 +291,192 @@ async function setExchangeRate(value, updatedBy = null) {
 
   return {
     rate,
+    updatedAt: now,
+    source: "database",
+  };
+}
+
+async function getDefaultMinimumPrice({
+  forceRefresh = false,
+} = {}) {
+  if (
+    !forceRefresh &&
+    Number.isFinite(
+      Number(defaultMinimumPriceCache.amount)
+    ) &&
+    Date.now() <
+      defaultMinimumPriceCache.expiresAt
+  ) {
+    return {
+      amount: Number(
+        defaultMinimumPriceCache.amount
+      ),
+      updatedAt:
+        defaultMinimumPriceCache.updatedAt,
+      source:
+        defaultMinimumPriceCache.source ||
+        "database",
+    };
+  }
+
+  try {
+    const collection = getSettingsCollection();
+    let setting = await collection.findOne({
+      key: DEFAULT_MINIMUM_PRICE_SETTING_KEY,
+    });
+
+    if (!setting) {
+      const now = new Date();
+      const initialAmount =
+        getEnvironmentDefaultMinimumPrice();
+
+      await collection.updateOne(
+        {
+          key:
+            DEFAULT_MINIMUM_PRICE_SETTING_KEY,
+        },
+        {
+          $setOnInsert: {
+            key:
+              DEFAULT_MINIMUM_PRICE_SETTING_KEY,
+            value: initialAmount,
+            currency: "NGN",
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+        { upsert: true }
+      );
+
+      setting = await collection.findOne({
+        key:
+          DEFAULT_MINIMUM_PRICE_SETTING_KEY,
+      });
+    }
+
+    const amount = Number(setting?.value);
+
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
+      throw createPricingError(
+        "Saved default minimum number price is invalid",
+        {
+          code:
+            "INVALID_SAVED_DEFAULT_MINIMUM_PRICE",
+          status: 500,
+        }
+      );
+    }
+
+    defaultMinimumPriceCache = {
+      amount,
+      updatedAt: setting?.updatedAt || null,
+      source: "database",
+      expiresAt:
+        Date.now() +
+        DEFAULT_MINIMUM_PRICE_CACHE_TTL_MS,
+    };
+
+    /*
+     * Keep old code that still reads the environment
+     * variable in sync for this running process.
+     */
+    process.env.AUTO_PRICING_MINIMUM_NGN =
+      String(amount);
+
+    return {
+      amount,
+      updatedAt:
+        defaultMinimumPriceCache.updatedAt,
+      source: "database",
+    };
+  } catch (error) {
+    const amount =
+      getCachedDefaultMinimumPriceValue();
+
+    defaultMinimumPriceCache = {
+      amount,
+      updatedAt:
+        defaultMinimumPriceCache.updatedAt,
+      source: "environment_fallback",
+      expiresAt: Date.now() + 5000,
+    };
+
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        "[Pricing] default-minimum database fallback:",
+        error.message
+      );
+    }
+
+    return {
+      amount,
+      updatedAt:
+        defaultMinimumPriceCache.updatedAt,
+      source: "environment_fallback",
+    };
+  }
+}
+
+async function setDefaultMinimumPrice(
+  value,
+  updatedBy = null
+) {
+  const amount = Number(value);
+
+  if (
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    amount > 100000000
+  ) {
+    throw createPricingError(
+      "Enter a valid default minimum number price",
+      {
+        code:
+          "INVALID_DEFAULT_MINIMUM_PRICE",
+        status: 400,
+      }
+    );
+  }
+
+  const collection = getSettingsCollection();
+  const now = new Date();
+
+  await collection.updateOne(
+    {
+      key: DEFAULT_MINIMUM_PRICE_SETTING_KEY,
+    },
+    {
+      $set: {
+        value: amount,
+        currency: "NGN",
+        updatedAt: now,
+        updatedBy: updatedBy || null,
+      },
+      $setOnInsert: {
+        key: DEFAULT_MINIMUM_PRICE_SETTING_KEY,
+        createdAt: now,
+      },
+    },
+    { upsert: true }
+  );
+
+  defaultMinimumPriceCache = {
+    amount,
+    updatedAt: now,
+    source: "database",
+    expiresAt:
+      Date.now() +
+      DEFAULT_MINIMUM_PRICE_CACHE_TTL_MS,
+  };
+
+  process.env.AUTO_PRICING_MINIMUM_NGN =
+    String(amount);
+
+  return {
+    amount,
     updatedAt: now,
     source: "database",
   };
@@ -495,7 +717,14 @@ async function resolveEffectiveOperator(options) {
   return (await resolvePricingStrategy(options)).operator;
 }
 
-function createDefaultRule({ server, country, service, operator }) {
+function createDefaultRule({
+  server,
+  country,
+  service,
+  operator,
+  minimumSellingPrice =
+    getCachedDefaultMinimumPriceValue(),
+}) {
   return {
     _id: null,
     server,
@@ -513,8 +742,8 @@ function createDefaultRule({ server, country, service, operator }) {
     markupPercent: 0,
     fixedMarkup: finiteNonNegative(process.env.AUTO_PRICING_BUFFER_NGN, 200),
     minimumSellingPrice: finiteNonNegative(
-      process.env.AUTO_PRICING_MINIMUM_NGN,
-      1000
+      minimumSellingPrice,
+      getCachedDefaultMinimumPriceValue()
     ),
     isActive: true,
     source: "automatic_cheapest_buffer",
@@ -606,11 +835,16 @@ async function resolveCustomerPricing({
   }
 
   if (!rule) {
+    const defaultMinimumPrice =
+      await getDefaultMinimumPrice();
+
     rule = createDefaultRule({
       server: normalizedServer,
       country: normalizedCountry,
       service: normalizedService,
       operator: normalizedOperator,
+      minimumSellingPrice:
+        defaultMinimumPrice.amount,
     });
   }
 
@@ -696,6 +930,8 @@ module.exports = {
   normalizeRuleInput,
   getExchangeRate,
   setExchangeRate,
+  getDefaultMinimumPrice,
+  setDefaultMinimumPrice,
   convertProviderCostToNaira,
   ruleMatchesSelection,
   findApplicableRule,
