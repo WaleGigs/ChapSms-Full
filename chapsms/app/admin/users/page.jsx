@@ -68,7 +68,10 @@ export default function AdminUsersPage() {
       setUsers((currentUsers) =>
         currentUsers.map((currentUser) =>
           currentUser._id === user._id
-            ? response.user
+            ? {
+                ...currentUser,
+                ...response.user,
+              }
             : currentUser
         )
       );
@@ -113,7 +116,10 @@ export default function AdminUsersPage() {
       setUsers((currentUsers) =>
         currentUsers.map((currentUser) =>
           currentUser._id === user._id
-            ? response.user
+            ? {
+                ...currentUser,
+                ...response.user,
+              }
             : currentUser
         )
       );
@@ -165,14 +171,31 @@ export default function AdminUsersPage() {
         }
       );
 
+      const nextBalance = Number(
+        response.balance || 0
+      );
+
+      setUsers((currentUsers) =>
+        currentUsers.map((currentUser) =>
+          currentUser._id === user._id
+            ? {
+                ...currentUser,
+                wallet: nextBalance,
+                walletBalance: nextBalance,
+                currentBalance: nextBalance,
+              }
+            : currentUser
+        )
+      );
+
       toast.success(
         adjustmentType === "credit"
-          ? `Wallet credited. New balance: ₦${Number(
-              response.balance || 0
-            ).toLocaleString("en-NG")}`
-          : `Wallet debited. New balance: ₦${Number(
-              response.balance || 0
-            ).toLocaleString("en-NG")}`
+          ? `Wallet credited. New balance: ₦${nextBalance.toLocaleString(
+              "en-NG"
+            )}`
+          : `Wallet debited. New balance: ₦${nextBalance.toLocaleString(
+              "en-NG"
+            )}`
       );
     } catch (error) {
       toast.error(error.message || "Unable to update wallet");
@@ -218,6 +241,16 @@ export default function AdminUsersPage() {
       month: "short",
       year: "numeric",
     }).format(new Date(value));
+  }
+
+  function formatNaira(value) {
+    const amount = Number(value || 0);
+
+    return `₦${(
+      Number.isFinite(amount) ? amount : 0
+    ).toLocaleString("en-NG", {
+      maximumFractionDigits: 2,
+    })}`;
   }
 
   return (
@@ -308,6 +341,14 @@ export default function AdminUsersPage() {
                     </th>
 
                     <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Balance
+                    </th>
+
+                    <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Total deposited
+                    </th>
+
+                    <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-400">
                       Joined
                     </th>
 
@@ -370,6 +411,28 @@ export default function AdminUsersPage() {
                               ? "Suspended"
                               : "Active"}
                           </span>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <p className="whitespace-nowrap text-sm font-black text-slate-950">
+                            {formatNaira(
+                              user.currentBalance ??
+                                user.walletBalance ??
+                                user.wallet
+                            )}
+                          </p>
+                          <p className="mt-1 whitespace-nowrap text-[11px] font-semibold text-slate-400">
+                            Current balance
+                          </p>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <p className="whitespace-nowrap text-sm font-black text-emerald-600">
+                            {formatNaira(user.totalDeposited)}
+                          </p>
+                          <p className="mt-1 whitespace-nowrap text-[11px] font-semibold text-slate-400">
+                            Real deposits
+                          </p>
                         </td>
 
                         <td className="px-6 py-4 text-sm font-semibold text-slate-500 dark:text-slate-400">
@@ -542,6 +605,30 @@ export default function AdminUsersPage() {
                       <span className="rounded-full bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-500">
                         {formatDate(user.createdAt)}
                       </span>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">
+                          Current balance
+                        </p>
+                        <p className="mt-1 truncate text-base font-black text-slate-950">
+                          {formatNaira(
+                            user.currentBalance ??
+                              user.walletBalance ??
+                              user.wallet
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="min-w-0 text-right">
+                        <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">
+                          Total deposited
+                        </p>
+                        <p className="mt-1 truncate text-base font-black text-emerald-600">
+                          {formatNaira(user.totalDeposited)}
+                        </p>
+                      </div>
                     </div>
 
                     {openMenuId === user._id && (
