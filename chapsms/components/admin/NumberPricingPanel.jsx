@@ -224,7 +224,7 @@ export default function NumberPricingPanel() {
               Default floor & dollar rate
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted-foreground)]">
-              The minimum price applies to numbers using automatic/default pricing. Saved country/service pricing rules keep their own configured minimums.
+              This is the global floor for every number service. Saved country/service rules can still have a higher minimum, but they can never make a customer price lower than this global amount.
             </p>
           </div>
 
