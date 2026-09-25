@@ -797,7 +797,10 @@ async function resolveCustomerPricing({
   pricingBasisNgn = null,
   draftRule = null,
 }) {
-  const exchangeRate = await getExchangeRate();
+  const [exchangeRate, globalMinimumPrice] = await Promise.all([
+    getExchangeRate(),
+    getDefaultMinimumPrice(),
+  ]);
   const normalizedServer = normalizeServer(server);
   const normalizedCountry = normalizeCountry(country);
   const normalizedService = normalizeService(service);
@@ -835,20 +838,44 @@ async function resolveCustomerPricing({
   }
 
   if (!rule) {
-    const defaultMinimumPrice =
-      await getDefaultMinimumPrice();
-
     rule = createDefaultRule({
       server: normalizedServer,
       country: normalizedCountry,
       service: normalizedService,
       operator: normalizedOperator,
       minimumSellingPrice:
-        defaultMinimumPrice.amount,
+        globalMinimumPrice.amount,
     });
   }
 
-  const pricingStyle = normalizePricingStyle(rule.pricingStyle, rule.operator);
+  /*
+   * The admin "Default minimum number price" is a GLOBAL floor.
+   * It applies to every number price, including saved country/service rules.
+   * A saved rule may set a HIGHER minimum, but it can never lower the global
+   * floor. This lets the admin change e.g. ₦1,000 -> ₦1,500 once and have
+   * Signal/WhatsApp/Telegram/etc. all respect it immediately.
+   */
+  const configuredRuleMinimum = finiteNonNegative(
+    rule.minimumSellingPrice,
+    0
+  );
+  const globalMinimumSellingPrice = finiteNonNegative(
+    globalMinimumPrice.amount,
+    getCachedDefaultMinimumPriceValue()
+  );
+  const effectiveMinimumSellingPrice = Math.max(
+    configuredRuleMinimum,
+    globalMinimumSellingPrice
+  );
+  const effectiveRule = {
+    ...rule,
+    minimumSellingPrice: effectiveMinimumSellingPrice,
+  };
+
+  const pricingStyle = normalizePricingStyle(
+    effectiveRule.pricingStyle,
+    effectiveRule.operator
+  );
 
   /*
    * Cheapest-operator pool percentage is selection-only. Never let an
@@ -863,7 +890,7 @@ async function resolveCustomerPricing({
         ? Math.max(providerCostNgn, Math.ceil(basisCandidate))
         : providerCostNgn;
 
-  const sellingPrice = calculateSellingPrice(effectiveBasisNgn, rule);
+  const sellingPrice = calculateSellingPrice(effectiveBasisNgn, effectiveRule);
   if (sellingPrice < providerCostNgn) {
     throw createPricingError(
       "The configured selling price is lower than the current provider cost. Update this pricing rule.",
@@ -886,29 +913,34 @@ async function resolveCustomerPricing({
     sellingPrice,
     profit,
     pricingRuleId: rule._id || null,
-    pricingMode: rule.pricingMode,
+    pricingMode: effectiveRule.pricingMode,
     pricingStyle,
     maxPriceBufferPercent: normalizeOperatorPoolPercent(
-      rule.maxPriceBufferPercent,
+      effectiveRule.maxPriceBufferPercent,
       50
     ),
-    pricingSource: rule.source || "database",
+    pricingSource: effectiveRule.source || "database",
     pricingRuleMatched: Boolean(rule._id),
+    configuredMinimumSellingPrice: configuredRuleMinimum,
+    globalMinimumSellingPrice,
+    effectiveMinimumSellingPrice,
     pricingSnapshot: {
       ruleId: rule._id ? String(rule._id) : null,
-      pricingMode: rule.pricingMode,
+      pricingMode: effectiveRule.pricingMode,
       pricingStyle,
       maxPriceBufferPercent: normalizeOperatorPoolPercent(
-        rule.maxPriceBufferPercent,
+        effectiveRule.maxPriceBufferPercent,
         50
       ),
       pricingBasisNgn: effectiveBasisNgn,
       exchangeRateNgnPerUsd: exchangeRate.rate,
-      fixedSellingPrice: finiteNonNegative(rule.fixedSellingPrice),
-      markupPercent: finiteNonNegative(rule.markupPercent),
-      fixedMarkup: finiteNonNegative(rule.fixedMarkup),
-      minimumSellingPrice: finiteNonNegative(rule.minimumSellingPrice),
-      source: rule.source || "database",
+      fixedSellingPrice: finiteNonNegative(effectiveRule.fixedSellingPrice),
+      markupPercent: finiteNonNegative(effectiveRule.markupPercent),
+      fixedMarkup: finiteNonNegative(effectiveRule.fixedMarkup),
+      minimumSellingPrice: effectiveMinimumSellingPrice,
+      configuredMinimumSellingPrice: configuredRuleMinimum,
+      globalMinimumSellingPrice,
+      source: effectiveRule.source || "database",
       calculatedAt: new Date(),
     },
   };
