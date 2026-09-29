@@ -1,8 +1,10 @@
-const axios = require("axios");
+const {
+  Resend,
+} = require("resend");
 
-const BREVO_API_KEY =
+const RESEND_API_KEY =
   String(
-    process.env.BREVO_API_KEY ||
+    process.env.RESEND_API_KEY ||
       "",
   ).trim();
 
@@ -18,12 +20,7 @@ const EMAIL_REPLY_TO =
       "",
   ).trim();
 
-function parseSender(value) {
-  const match = String(value || "").trim().match(/^(.+?)\s*<([^<>]+)>$/);
-  return match
-    ? { name: match[1].trim().replace(/^['"]|['"]$/g, ""), email: match[2].trim() }
-    : { email: String(value || "").trim() };
-}
+let resendClient = null;
 
 function isValidEmailAddress(
   value,
@@ -38,9 +35,9 @@ function isValidEmailAddress(
 function validateEmailConfiguration() {
   const missing = [];
 
-  if (!BREVO_API_KEY) {
+  if (!RESEND_API_KEY) {
     missing.push(
-      "BREVO_API_KEY",
+      "RESEND_API_KEY",
     );
   }
 
@@ -48,18 +45,6 @@ function validateEmailConfiguration() {
     missing.push(
       "EMAIL_FROM",
     );
-  }
-
-  if (EMAIL_FROM && !isValidEmailAddress(parseSender(EMAIL_FROM).email)) {
-    const error = new Error("EMAIL_FROM must contain a valid email address");
-    error.code = "EMAIL_CONFIG_INVALID";
-    throw error;
-  }
-
-  if (EMAIL_REPLY_TO && !isValidEmailAddress(parseSender(EMAIL_REPLY_TO).email)) {
-    const error = new Error("EMAIL_REPLY_TO must contain a valid email address");
-    error.code = "EMAIL_CONFIG_INVALID";
-    throw error;
   }
 
   if (missing.length > 0) {
@@ -77,12 +62,25 @@ function validateEmailConfiguration() {
   }
 
   return {
-    provider: "brevo",
+    provider: "resend",
     from: EMAIL_FROM,
     replyTo:
       EMAIL_REPLY_TO ||
       null,
   };
+}
+
+function getResendClient() {
+  validateEmailConfiguration();
+
+  if (!resendClient) {
+    resendClient =
+      new Resend(
+        RESEND_API_KEY,
+      );
+  }
+
+  return resendClient;
 }
 
 function escapeHtml(value) {
@@ -140,13 +138,13 @@ function createEmailError(
     "EMAIL_PROVIDER_ERROR";
 
   error.provider =
-    "brevo";
+    "resend";
 
   if (
-    providerError?.response?.status || providerError?.statusCode
+    providerError?.statusCode
   ) {
     error.statusCode =
-      providerError?.response?.status || providerError.statusCode;
+      providerError.statusCode;
   }
 
   return error;
@@ -181,38 +179,42 @@ async function sendEmail({
     throw error;
   }
 
-  validateEmailConfiguration();
+  const client =
+    getResendClient();
 
   const payload = {
-    sender: parseSender(EMAIL_FROM),
-    to: [{ email: recipient }],
+    from: EMAIL_FROM,
+    to: [recipient],
     subject,
-    textContent: text,
-    htmlContent: html,
+    text,
+    html,
   };
 
   if (EMAIL_REPLY_TO) {
-    payload.replyTo = parseSender(EMAIL_REPLY_TO);
+    payload.replyTo =
+      EMAIL_REPLY_TO;
   }
 
   const startedAt =
     Date.now();
 
   try {
-    const { data } = await axios.post(
-      "https://api.brevo.com/v3/smtp/email",
-      payload,
-      {
-        headers: {
-          "api-key": BREVO_API_KEY,
-          "Content-Type": "application/json",
-          accept: "application/json",
-        },
-        timeout: 15000,
-      },
-    );
+    const {
+      data,
+      error:
+        providerError,
+    } =
+      await client.emails.send(
+        payload,
+      );
 
-    if (!data?.messageId) {
+    if (providerError) {
+      throw createEmailError(
+        providerError,
+      );
+    }
+
+    if (!data?.id) {
       const error =
         new Error(
           "The email provider did not return a message ID",
@@ -225,11 +227,11 @@ async function sendEmail({
     }
 
     console.log(
-      "✅ Brevo accepted email:",
+      "✅ Resend accepted email:",
       {
         to: recipient,
         messageId:
-          data.messageId,
+          data.id,
         durationMs:
           Date.now() -
           startedAt,
@@ -237,24 +239,17 @@ async function sendEmail({
     );
 
     return {
-      provider: "brevo",
-      id: data.messageId,
+      provider: "resend",
+      id: data.id,
       messageId:
-        data.messageId,
+        data.id,
       accepted: [
         recipient,
       ],
     };
-  } catch (providerError) {
-    const error = providerError?.response
-      ? createEmailError({
-          message: providerError.response.data?.message || "Brevo rejected the email",
-          code: providerError.response.data?.code || "EMAIL_PROVIDER_ERROR",
-          statusCode: providerError.response.status,
-        })
-      : providerError;
+  } catch (error) {
     console.error(
-      "❌ Brevo email failed:",
+      "❌ Resend email failed:",
       {
         to: recipient,
         code:
