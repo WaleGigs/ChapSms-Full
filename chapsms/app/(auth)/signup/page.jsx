@@ -11,6 +11,7 @@ import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import PasswordField from "@/components/auth/PasswordField";
+import GoogleAuthButton from "@/components/auth/GoogleAuthButton";
 
 function normalizeEmail(value) {
   return String(value || "")
@@ -44,7 +45,7 @@ function validatePassword(password) {
 
 export default function SignupPage() {
   const router = useRouter();
-  const { signup } = useAuth();
+  const { signup, googleLogin } = useAuth();
 
   const [form, setForm] = useState({
     username: "",
@@ -57,6 +58,7 @@ export default function SignupPage() {
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   function updateField(event) {
     const {
@@ -142,7 +144,7 @@ export default function SignupPage() {
   async function handleSubmit(event) {
     event.preventDefault();
 
-    if (loading) {
+    if (loading || googleLoading) {
       return;
     }
 
@@ -198,6 +200,29 @@ export default function SignupPage() {
     }
   }
 
+  async function handleGoogle(credential) {
+    if (loading || googleLoading) return;
+
+    try {
+      setGoogleLoading(true);
+      setSubmitError("");
+      const response = await googleLogin(credential, { rememberMe: true });
+      toast.success(response?.message || "Google sign-in successful");
+
+      const requestedPath = new URLSearchParams(window.location.search).get("next") || "";
+      const safeNextPath = requestedPath.startsWith("/") && !requestedPath.startsWith("//")
+        ? requestedPath
+        : "/dashboard";
+      router.replace(response?.user?.role === "admin" ? "/admin" : safeNextPath);
+    } catch (error) {
+      const message = error?.message || "Google sign-up failed. Please try again.";
+      setSubmitError(message);
+      toast.error(message);
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
+
   const passwordError =
     validatePassword(
       form.password
@@ -239,7 +264,8 @@ export default function SignupPage() {
     !passwordsDoNotMatch &&
     Boolean(form.confirmPassword) &&
     form.terms &&
-    !loading;
+    !loading &&
+    !googleLoading;
 
   return (
     <Card className="rounded-[26px] p-5 shadow-xl sm:p-8">
@@ -267,6 +293,20 @@ export default function SignupPage() {
           {submitError}
         </div>
       ) : null}
+
+      <GoogleAuthButton
+        onCredential={handleGoogle}
+        disabled={loading || googleLoading}
+        text="continue_with"
+      />
+
+      <div className="my-6 flex items-center gap-3">
+        <span className="h-px flex-1 bg-[var(--border)]" />
+        <span className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+          or use email
+        </span>
+        <span className="h-px flex-1 bg-[var(--border)]" />
+      </div>
 
       <form
         onSubmit={handleSubmit}
