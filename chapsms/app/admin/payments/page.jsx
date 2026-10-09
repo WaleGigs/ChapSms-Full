@@ -220,7 +220,7 @@ function countryDisplayName(
 
     !raw ||
 
-    /^\\\d+$/.test(raw)
+    /^\d+$/.test(raw)
 
   ) {
 
@@ -580,7 +580,7 @@ function purchaseAttemptLabel(payment) {
 
     description.match(
 
-      /^Reserved for\s+(.+?)\s+\\((.+?)\\)\s+-\s+(server\d+)/i
+      /^Reserved for\s+(.+?)\s+\((.+?)\)\s+-\s+(server\d+)/i
 
     );
 
@@ -590,7 +590,7 @@ function purchaseAttemptLabel(payment) {
 
     description.match(
 
-      /^(.+?)\s+\\((.+?)\\)\s+-\s+(server\d+)$/i
+      /^(.+?)\s+\((.+?)\)\s+-\s+(server\d+)$/i
 
     );
 
@@ -656,7 +656,7 @@ function purchaseAttemptLabel(payment) {
 
     description.match(
 
-      /^([a-z]{1,8})[-_]\(\d+)$/i
+      /^([a-z]{1,8})[-_]\d+$/i
 
     );
 
