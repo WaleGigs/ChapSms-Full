@@ -776,7 +776,7 @@ export default function AdminPaymentsPage() {
       setPage(nextPage);
       const paging = response?.pagination;
       // If the backend does not return pagination metadata, never promise more pages.
-      setHasMore(Boolean(paging?.hasNextPage ?? (paging?.totalPages ? nextPage < paging.totalPages : false)));
+      setHasMore(Boolean(paging?.hasNextPage ?? (Number(paging?.pages ?? paging?.totalPages ?? 1) > nextPage)));
     } catch (loadError) {
       console.error("Admin payment history failed:", loadError);
       setError(loadError?.message || "Unable to load payment history");
