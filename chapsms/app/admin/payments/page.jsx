@@ -11,6 +11,7 @@ import {
   useMemo,
 
   useState,
+  useRef,
 
 } from "react";
 
@@ -656,7 +657,7 @@ function purchaseAttemptLabel(payment) {
 
     description.match(
 
-      /^([a-z]{1,8})[-_]\d+$/i
+      /^([a-z]{1,8})[-_](\d+)$/i
 
     );
 
@@ -740,131 +741,57 @@ export default function AdminPaymentsPage() {
 
   const [payments, setPayments] = useState([]);
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [pages, setPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const requestId = useRef(0);
 
-  const [loading, setLoading] =
+  // Search the entire payment history on the server, not just the visible page.
+  useEffect(() => {
+    const timeout = setTimeout(() => setSearch(searchInput.trim()), 350);
+    return () => clearTimeout(timeout);
+  }, [searchInput]);
 
-    useState(true);
-
-  const [refreshing, setRefreshing] =
-
-    useState(false);
-
-  const [error, setError] =
-
-    useState("");
-
-  const [search, setSearch] =
-
-    useState("");
-
-
-
-  const load = useCallback(async ({ refresh = false, nextPage = 1 } = {}) => {
+  const load = useCallback(async ({ nextPage = 1, refresh = false, query = search } = {}) => {
+    const id = ++requestId.current;
     try {
-      if (nextPage > 1) setLoadingMore(true);
-      else if (refresh) setRefreshing(true);
+      if (refresh) setRefreshing(true);
       else setLoading(true);
       setError("");
-      const response = await adminPricingService.getPayments({ page: nextPage, limit: 50 });
-      const batch = Array.isArray(response?.payments) ? response.payments : [];
-      setPayments((current) => nextPage === 1 ? batch : [
-        ...current,
-        ...batch.filter((item) => !current.some((old) => String(old.id) === String(item.id))),
-      ]);
-      setPage(nextPage);
-      const paging = response?.pagination;
-      // If the backend does not return pagination metadata, never promise more pages.
-      setHasMore(Boolean(paging?.hasNextPage ?? (Number(paging?.pages ?? paging?.totalPages ?? 1) > nextPage)));
+      const response = await adminPricingService.getPayments({
+        page: nextPage,
+        limit: 50,
+        search: query,
+      });
+      if (id !== requestId.current) return;
+      if (response?.success === false) throw new Error(response.message || "Unable to load payment history");
+      setPayments(Array.isArray(response?.payments) ? response.payments : []);
+      const pagination = response?.pagination || {};
+      setPage(Number(pagination.page) || nextPage);
+      setTotal(Number(pagination.total) || 0);
+      setPages(Math.max(1, Number(pagination.pages ?? pagination.totalPages) || 1));
     } catch (loadError) {
+      if (id !== requestId.current) return;
       console.error("Admin payment history failed:", loadError);
       setError(loadError?.message || "Unable to load payment history");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
-      setLoadingMore(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const filtered =
-
-    useMemo(() => {
-
-      const query =
-
-        search
-
-          .trim()
-
-          .toLowerCase();
-
-
-
-      if (!query) {
-
-        return payments;
-
+      if (id === requestId.current) {
+        setLoading(false);
+        setRefreshing(false);
       }
+    }
+  }, [search]);
 
+  useEffect(() => {
+    load({ nextPage: 1 });
+    return () => { requestId.current += 1; };
+  }, [load]);
 
-
-      return payments.filter(
-
-        (payment) =>
-
-          [
-
-            payment?.customer
-
-              ?.username,
-
-            payment?.customer
-
-              ?.firstName,
-
-            payment?.customer
-
-              ?.lastName,
-
-            payment?.customer
-
-              ?.email,
-
-            payment?.reference,
-
-            payment?.transactionId,
-
-            payment?.type,
-
-            payment?.status,
-
-            payment?.gateway,
-
-            payment?.method,
-
-            payment?.description,
-
-            payment?.serviceName,
-
-            payment?.countryName,
-
-          ]
-
-            .filter(Boolean)
-
-            .join(" ")
-
-            .toLowerCase()
-
-            .includes(query)
-
-      );
-
-    }, [payments, search]);
-
+  const filtered = payments;
 
 
   return (
@@ -971,11 +898,11 @@ export default function AdminPaymentsPage() {
 
             <input
 
-              value={search}
+              value={searchInput}
 
               onChange={(event) =>
 
-                setSearch(
+                setSearchInput(
 
                   event.target.value
 
@@ -1478,12 +1405,23 @@ export default function AdminPaymentsPage() {
         )}
 
       
-        {!loading && !error && hasMore && (
-          <div className="border-t border-[var(--border)] p-4 text-center">
-            <button type="button" disabled={loadingMore} onClick={() => load({ nextPage: page + 1 })}
-              className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white disabled:opacity-50">
-              {loadingMore ? "Loading older payments..." : "Load older payments"}
-            </button>
+        {!loading && !error && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] px-4 py-4 sm:px-6">
+            <p className="text-xs font-semibold text-[var(--muted-foreground)] sm:text-sm">
+              Page {page.toLocaleString("en-NG")} of {pages.toLocaleString("en-NG")} · {total.toLocaleString("en-NG")} payments
+            </p>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => load({ nextPage: page - 1 })}
+                disabled={page <= 1 || loading || refreshing}
+                className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-40">
+                Previous
+              </button>
+              <button type="button" onClick={() => load({ nextPage: page + 1 })}
+                disabled={page >= pages || loading || refreshing}
+                className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-40">
+                Next
+              </button>
+            </div>
           </div>
         )}
 
