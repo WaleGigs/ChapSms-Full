@@ -4,6 +4,8 @@ const cookieParser = require("cookie-parser");
 const socialRoutes = require("./routes/socialRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const adminPricingRoutes = require("./routes/adminPricingRoutes");
+const adminMetricsRoutes = require("./routes/adminMetricsRoutes");
+const adminActivityRoutes = require("./routes/adminActivityRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const authRoutes = require("./routes/authRoutes");
 const orderRoutes = require("./routes/orderRoutes");
@@ -69,6 +71,8 @@ app.get("/api/cors-test", (req, res) => {
 });
 
 app.use("/api/admin/pricing", adminPricingRoutes);
+app.use("/api/admin/metrics", adminMetricsRoutes);
+app.use("/api/admin/activity", adminActivityRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/wallet", walletRoutes);
@@ -76,6 +80,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/catalog", catalogRoutes);
 app.use("/api/social", socialRoutes);
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
