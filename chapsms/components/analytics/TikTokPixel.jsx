@@ -1,95 +1,58 @@
-const PIXEL_ID = "D9UJK4BC77UDTFS1RGU0";
+const PIXEL_IDS = [
+  "D9UJK4BC77UDTFS1RGU0", // Existing pixel
+  "DB597OBC77U6DDDLBIT0", // Second pixel
+];
 
 const PIXEL_CODE = `
 !function (w, d, t) {
-  w.TiktokAnalyticsObject=t;
-  var ttq=w[t]=w[t]||[];
-
-  ttq.methods=[
-    "page",
-    "track",
-    "identify",
-    "instances",
-    "debug",
-    "on",
-    "off",
-    "once",
-    "ready",
-    "alias",
-    "group",
-    "enableCookie",
-    "disableCookie",
-    "holdConsent",
-    "revokeConsent",
-    "grantConsent"
-  ];
-
-  ttq.setAndDefer=function(t,e){
-    t[e]=function(){
-      t.push([e].concat(
-        Array.prototype.slice.call(arguments,0)
-      ));
+  w.TiktokAnalyticsObject = t;
+  var ttq = w[t] = w[t] || [];
+  ttq.methods = ["page", "track", "identify", "instances", "debug", "on", "off", "once", "ready", "alias", "group", "enableCookie", "disableCookie", "holdConsent", "revokeConsent", "grantConsent"];
+  ttq.setAndDefer = function (target, method) {
+    target[method] = function () {
+      target.push([method].concat(Array.prototype.slice.call(arguments, 0)));
     };
   };
-
-  for(var i=0;i<ttq.methods.length;i++){
-    ttq.setAndDefer(ttq,ttq.methods[i]);
+  for (var i = 0; i < ttq.methods.length; i++) {
+    ttq.setAndDefer(ttq, ttq.methods[i]);
   }
-
-  ttq.instance=function(t){
-    for(
-      var e=ttq._i[t]||[],
-      n=0;
-      n<ttq.methods.length;
-      n++
-    ){
-      ttq.setAndDefer(
-        e,
-        ttq.methods[n]
-      );
+  ttq.instance = function (id) {
+    for (var instance = ttq._i[id] || [], j = 0; j < ttq.methods.length; j++) {
+      ttq.setAndDefer(instance, ttq.methods[j]);
     }
-
-    return e;
+    return instance;
   };
-
-  ttq.load=function(e,n){
-    var r="https://analytics.tiktok.com/i18n/pixel/events.js",
-        o=n&&n.partner;
-
-    ttq._i=ttq._i||{};
-    ttq._i[e]=[];
-    ttq._i[e]._u=r;
-    ttq._t=ttq._t||{};
-    ttq._t[e]=+new Date;
-    ttq._o=ttq._o||{};
-    ttq._o[e]=n||{};
-
-    n=document.createElement("script");
-    n.type="text/javascript";
-    n.async=!0;
-    n.src=r+"?sdkid="+e+"&lib="+t;
-
-    e=document.getElementsByTagName("script")[0];
-    e.parentNode.insertBefore(n,e);
+  ttq.load = function (id, options) {
+    var url = "https://analytics.tiktok.com/i18n/pixel/events.js";
+    ttq._i = ttq._i || {};
+    if (ttq._i[id]) return;
+    ttq._i[id] = [];
+    ttq._i[id]._u = url;
+    ttq._t = ttq._t || {};
+    ttq._t[id] = +new Date();
+    ttq._o = ttq._o || {};
+    ttq._o[id] = options || {};
+    var script = d.createElement("script");
+    script.type = "text/javascript";
+    script.async = true;
+    script.src = url + "?sdkid=" + encodeURIComponent(id) + "&lib=" + t;
+    var firstScript = d.getElementsByTagName("script")[0];
+    if (firstScript && firstScript.parentNode) {
+      firstScript.parentNode.insertBefore(script, firstScript);
+    } else {
+      (d.head || d.documentElement).appendChild(script);
+    }
   };
-
-  ttq.load("${PIXEL_ID}");
+  ${PIXEL_IDS.map((id) => `ttq.load(${JSON.stringify(id)});`).join("\n  ")}
   ttq.page();
 }(window, document, "ttq");
 `;
 
 export default function TikTokPixel() {
-  /*
-   * Put this component inside <head> in app/layout.jsx.
-   * Using a normal server-rendered <script> here mirrors TikTok's own
-   * instruction to place the base code between <head> and </head>.
-   */
   return (
     <script
       id="tiktok-pixel-base-code"
-      dangerouslySetInnerHTML={{
-        __html: PIXEL_CODE,
-      }}
+      dangerouslySetInnerHTML={{ __html: PIXEL_CODE }}
     />
   );
 }
