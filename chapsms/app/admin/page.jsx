@@ -183,6 +183,8 @@ export default function AdminOverviewPage() {
         />
       </Section>
 
+      {/* Daily financial metrics: 7 / 14 / 30 days */}
+
       <Section title="Numbers">
         <AdminSummaryCard label="Numbers revenue" value={formatNaira(numberRevenue)} delta={formatDeltaNaira(todayNumberRevenue)} icon={CircleDollarSign} loading={loading} />
         <AdminSummaryCard label="Numbers profit" value={formatNaira(numberProfit)} delta={formatDeltaNaira(todayNumberProfit)} icon={TrendingUp} loading={loading} />
