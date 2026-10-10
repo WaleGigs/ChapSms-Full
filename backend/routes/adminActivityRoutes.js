@@ -1,3 +1,4 @@
+// Save as backend/routes/adminActivityRoutes.js (CommonJS).
 const express = require('express');
 const { protect, admin } = require('../middleware/authMiddleware');
 const { getActivity } = require('../controllers/adminActivityController');
