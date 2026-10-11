@@ -5,6 +5,7 @@ const socialRoutes = require("./routes/socialRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const adminPricingRoutes = require("./routes/adminPricingRoutes");
 const adminMetricsRoutes = require("./routes/adminMetricsRoutes");
+const adminDailyChangesRoutes = require("./routes/adminDailyChangesRoutes");
 const adminActivityRoutes = require("./routes/adminActivityRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const authRoutes = require("./routes/authRoutes");
@@ -72,6 +73,7 @@ app.get("/api/cors-test", (req, res) => {
 
 app.use("/api/admin/pricing", adminPricingRoutes);
 app.use("/api/admin/metrics", adminMetricsRoutes);
+app.use("/api/admin/daily-changes", adminDailyChangesRoutes);
 app.use("/api/admin/activity", adminActivityRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/auth", authRoutes);
