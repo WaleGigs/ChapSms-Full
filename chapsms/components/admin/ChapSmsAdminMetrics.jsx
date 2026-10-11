@@ -1,493 +1,78 @@
-"use client";
+'use client';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
 
-
-
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAuth } from "@/context/AuthContext";
-
-
-
-/**
-
- * ChapSms Admin Metrics — drop-in Next.js client component.
-
- *
-
- * Backend contract (authenticated GET request):
-
- *   /api/admin/metrics?days=7 (also 14, 30)
-
- *   {
-
- *     rows: [
-
- *       {
-
- *         date: "2026-10-10", // YYYY-MM-DD in your reporting timezone
-
- *         orders: 124,        // completed/paid orders only
-
- *         turnover: 74000,    // NGN revenue from completed orders
-
- *         cost: 42000,        // NGN actual provider/service cost
-
- *         profit: 32000       // NGN; optional if cost supplied
-
- *       }
-
- *     ]
-
- *   }
-
- *
-
- * No synthetic figures are shown. API path, fetch and timezone are configurable.
-
- */
-
-const WINDOWS = [7, 14, 30];
-
-const money = new Intl.NumberFormat("en-NG", {
-
-  style: "currency", currency: "NGN", maximumFractionDigits: 2,
-
-});
-
-const integer = new Intl.NumberFormat("en-NG");
-
-
-
-function numberOrNull(value) {
-
-  if (value === null || value === undefined || value === "") return null;
-
-  const n = Number(value);
-
-  return Number.isFinite(n) ? n : null;
-
+const FIELDS = [
+  ['date', 'Date', 'date'], ['signups', 'Signups', 'number'],
+  ['toppedUp', 'Topped Up', 'toppedUp'], ['firstDayDeposit', 'First Day Deposit', 'money'],
+  ['depositedToDate', 'Deposited to Date', 'money'],
+  ['usersBalance', 'Users Balance', 'money'], ['boughtSameDay', 'Bought Same Day', 'number'],
+  ['boughtToDate', 'Bought to Date', 'boughtToDate'], ['purchases', 'Purchases', 'number'],
+  ['profitSameDay', 'Profit Same Day', 'money'], ['profitToDate', 'Profit to Date', 'money'],
+];
+const formatNumber = new Intl.NumberFormat('en-NG', { maximumFractionDigits: 1 });
+const formatMoney = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 });
+function display(row, field, kind) {
+  const value = row?.[field];
+  if (kind === 'date') return value || '—';
+  if (value === null || value === undefined) return '—';
+  if (kind === 'money') return formatMoney.format(value);
+  if (kind === 'toppedUp' || kind === 'boughtToDate') {
+    const percent = row?.[`${field}Percent`];
+    return <>{formatNumber.format(value)} {percent == null ? null : <span className="csm-pct">{formatNumber.format(percent)}%</span>}</>;
+  }
+  return formatNumber.format(value);
 }
-
-
-
-function normalizeRows(data) {
-
-  const list = Array.isArray(data) ? data : data?.rows ?? data?.daily ?? data?.dailyMetrics ?? data?.data?.rows;
-
-  if (!Array.isArray(list)) throw new Error("Metrics API must return a daily or rows array.");
-
-  return list.map((entry, index) => {
-
-    const date = String(entry.date ?? "").slice(0, 10);
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-
-      throw new Error(`Invalid date in metrics row ${index + 1}.`);
-
-    }
-
-    const orders = numberOrNull(entry.orders);
-
-    const turnover = numberOrNull(entry.turnover ?? entry.revenue);
-
-    const cost = numberOrNull(entry.cost);
-
-    const suppliedProfit = numberOrNull(entry.profit);
-
-    const profit = suppliedProfit ?? (turnover !== null && cost !== null ? turnover - cost : null);
-
-    return { date, orders, turnover, cost, profit };
-
-  }).sort((a, b) => b.date.localeCompare(a.date));
-
-}
-
-
-
-function dateLabel(iso, timezone) {
-
-  const [year, month, day] = iso.split("-").map(Number);
-
-  const d = new Date(Date.UTC(year, month - 1, day, 12));
-
-  return new Intl.DateTimeFormat("en-NG", {
-
-    weekday: "short", day: "numeric", month: "short", timeZone: timezone,
-
-  }).format(d);
-
-}
-
-
-
-function displayMoney(value) {
-
-  return value === null ? "—" : money.format(value);
-
-}
-
-
-
-function displayNumber(value) {
-
-  return value === null ? "—" : integer.format(value);
-
-}
-
-
-
-export default function ChapSmsAdminMetrics({
-
-  apiUrl,
-
-  fetcher = fetch,
-
-  timezone = "Africa/Lagos",
-
-  title = "Admin control panel",
-
-}) {
-
+export default function ChapSmsAdminMetrics({ title = 'Admin control panel' }) {
   const { token, user, authLoading } = useAuth();
-  // NEXT_PUBLIC_API_URL is the same /api base used by auth.service.js.
-  const apiBase = String(process.env.NEXT_PUBLIC_API_URL || "").trim().replace(/\/+$/, "");
-  const resolvedUrl = apiUrl || (apiBase ? `${apiBase}/admin/metrics` : "");
-  const isAdmin = user?.role === "admin";
   const [days, setDays] = useState(7);
-
-  const [rows, setRows] = useState([]);
-
+  const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  const [error, setError] = useState("");
-
-  const [expandedDate, setExpandedDate] = useState(null);
-
-  const [refreshIndex, setRefreshIndex] = useState(0);
-
-
-
-  const reload = useCallback(() => setRefreshIndex((n) => n + 1), []);
-
-
-
+  const [error, setError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const reload = useCallback(() => setRefresh((n) => n + 1), []);
+  const apiBase = String(process.env.NEXT_PUBLIC_API_URL || '').trim().replace(/\/+$/, '');
   useEffect(() => {
-
+    if (authLoading) return;
+    if (!token || user?.role !== 'admin') { setLoading(false); setError('Admin authentication required.'); return; }
+    if (!apiBase) { setLoading(false); setError('Set NEXT_PUBLIC_API_URL in your frontend .env.local.'); return; }
     const controller = new AbortController();
-
-    async function load() {
-      if (authLoading) return;
-      if (!token || !isAdmin) {
-        setLoading(false);
-        setRows([]);
-        setError("Admin authentication is required to view metrics.");
-        return;
-      }
-      if (!resolvedUrl) {
-        setLoading(false);
-        setError("NEXT_PUBLIC_API_URL is missing. Set it to http://localhost:5050/api in .env.local.");
-        return;
-      }
-
-      setLoading(true);
-
-      setError("");
-
+    setLoading(true); setError('');
+    (async () => {
       try {
-
-        const separator = resolvedUrl.includes("?") ? "&" : "?";
-
-        const response = await fetcher(`${resolvedUrl}${separator}days=${days}`, {
-
-          method: "GET", credentials: "include", signal: controller.signal,
-
-          headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
-
+        const response = await fetch(`${apiBase}/admin/metrics?days=${days}`, {
+          headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+          credentials: 'include', cache: 'no-store', signal: controller.signal,
         });
-
-        if (!response.ok) {
-
-          throw new Error(response.status === 401 || response.status === 403
-
-            ? "You are not authorized to view admin metrics."
-
-            : `Unable to load metrics (HTTP ${response.status}).`);
-
-        }
-
-        const payload = await response.json();
-
-        const parsed = normalizeRows(payload);
-
-        if (!controller.signal.aborted) {
-
-          setRows(parsed);
-
-          setExpandedDate(null);
-
-        }
-
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || `Unable to load metrics (HTTP ${response.status}).`);
+        if (!Array.isArray(data.daily)) throw new Error('Metrics API did not return a daily array.');
+        if (!controller.signal.aborted) setPayload(data);
       } catch (err) {
-
-        if (!controller.signal.aborted) {
-
-          setRows([]);
-
-          setError(err?.message || "Unable to load metrics.");
-
-        }
-
-      } finally {
-
-        if (!controller.signal.aborted) setLoading(false);
-
-      }
-
-    }
-
-    load();
-
+        if (!controller.signal.aborted) { setPayload(null); setError(err.message || 'Unable to load metrics.'); }
+      } finally { if (!controller.signal.aborted) setLoading(false); }
+    })();
     return () => controller.abort();
-
-  }, [resolvedUrl, days, fetcher, refreshIndex, token, isAdmin, authLoading]);
-
-
-
-  const totals = useMemo(() => {
-
-    const sum = (key) => rows.every((r) => r[key] !== null)
-
-      ? rows.reduce((acc, r) => acc + r[key], 0) : null;
-
-    return { orders: sum("orders"), turnover: sum("turnover"), profit: sum("profit") };
-
-  }, [rows]);
-
-
-
-  return (
-
-    <section className="csm-metrics" aria-label="Admin sales and profit metrics">
-
-      <div className="csm-heading">
-
-        <div>
-
-          <h2>{title}</h2>
-
-          <p>Pricing, profit tracking, users, and order monitoring</p>
-
-        </div>
-
-        <button className="csm-refresh" type="button" onClick={reload} disabled={loading}>
-
-          {loading ? "Loading…" : "↻ Refresh"}
-
-        </button>
-
-      </div>
-
-
-
-      <div className="csm-panel">
-
-        <div className="csm-toolbar">
-
-          <span className="csm-toolbar-label">Daily metrics</span>
-
-          <div className="csm-tabs" role="group" aria-label="Reporting period">
-
-            {WINDOWS.map((windowDays) => (
-
-              <button key={windowDays} type="button"
-
-                className={days === windowDays ? "csm-tab active" : "csm-tab"}
-
-                aria-pressed={days === windowDays}
-
-                onClick={() => setDays(windowDays)}>
-
-                {windowDays}d
-
-              </button>
-
-            ))}
-
-          </div>
-
-        </div>
-
-
-
-        {error ? <div className="csm-error" role="alert">{error}<br /><small>Connect the component to an authenticated admin reporting endpoint.</small></div> : null}
-
-        {loading ? <div className="csm-empty" role="status">Loading real transaction metrics…</div> : null}
-
-        {!loading && !error && rows.length === 0 ? (
-
-          <div className="csm-empty">No completed-order metrics were returned for this period.</div>
-
-        ) : null}
-
-
-
-        {!loading && !error && rows.length > 0 ? (
-
-          <div className="csm-scroll">
-
-            <table>
-
-              <thead>
-
-                <tr><th>Date</th><th>Orders</th><th>Turnover</th><th>Profit</th><th aria-label="Expand row" /></tr>
-
-              </thead>
-
-              <tbody>
-
-                {rows.map((row) => {
-
-                  const expanded = expandedDate === row.date;
-
-                  return (
-
-                    <ReactFragment key={row.date}>
-
-                      <tr className="csm-data-row">
-
-                        <td>{dateLabel(row.date, timezone)}</td>
-
-                        <td>{displayNumber(row.orders)}</td>
-
-                        <td>{displayMoney(row.turnover)}</td>
-
-                        <td className={row.profit !== null && row.profit < 0 ? "csm-negative" : ""}>{displayMoney(row.profit)}</td>
-
-                        <td><button type="button" className="csm-expand" aria-label={`${expanded ? "Collapse" : "Expand"} ${row.date}`} aria-expanded={expanded} onClick={() => setExpandedDate(expanded ? null : row.date)}>{expanded ? "⌃" : "›"}</button></td>
-
-                      </tr>
-
-                      {expanded ? (
-
-                        <tr className="csm-details-row"><td colSpan={5}>
-
-                          <div className="csm-details">
-
-                            <div><span>Reporting date</span><strong>{row.date}</strong></div>
-
-                            <div><span>Completed orders</span><strong>{displayNumber(row.orders)}</strong></div>
-
-                            <div><span>Turnover</span><strong>{displayMoney(row.turnover)}</strong></div>
-
-                            <div><span>Provider cost</span><strong>{displayMoney(row.cost)}</strong></div>
-
-                            <div><span>Profit</span><strong>{displayMoney(row.profit)}</strong></div>
-
-                            <div><span>Profit margin</span><strong>{row.profit !== null && row.turnover > 0 ? `${((row.profit / row.turnover) * 100).toFixed(1)}%` : "—"}</strong></div>
-
-                          </div>
-
-                        </td></tr>
-
-                      ) : null}
-
-                    </ReactFragment>
-
-                  );
-
-                })}
-
-              </tbody>
-
-              <tfoot>
-
-                <tr><td>Total</td><td>{displayNumber(totals.orders)}</td><td>{displayMoney(totals.turnover)}</td><td>{displayMoney(totals.profit)}</td><td /></tr>
-
-              </tfoot>
-
-            </table>
-
-          </div>
-
-        ) : null}
-
-      </div>
-
-      <p className="csm-footnote">All amounts in NGN. Totals include only rows supplied by your backend. Profit should exclude refunds and account for actual provider costs.</p>
-
-      <style jsx>{`
-
-        .csm-metrics{color:#e6edff;font-family:inherit;width:100%}
-
-        .csm-heading{display:flex;justify-content:space-between;align-items:start;gap:16px;margin-bottom:22px}
-
-        .csm-heading h2{font-size:clamp(20px,2.4vw,28px);font-weight:750;margin:0 0 5px}
-
-        .csm-heading p,.csm-footnote{font-size:12px;color:#95a3c1;margin:0}
-
-        .csm-refresh{background:#172541;border:1px solid #304161;border-radius:9px;padding:9px 12px;color:#d8e5ff;cursor:pointer;white-space:nowrap}
-
-        .csm-refresh:disabled{opacity:.55;cursor:wait}
-
-        .csm-panel{border:1px solid #243657;border-radius:14px;background:#111c33;overflow:hidden}
-
-        .csm-toolbar{display:flex;align-items:center;justify-content:space-between;padding:16px;gap:12px;border-bottom:1px solid #253451}
-
-        .csm-toolbar-label{font-size:13px;font-weight:700}
-
-        .csm-tabs{display:flex;gap:4px;background:#0a1428;border:1px solid #253451;padding:3px;border-radius:9px}
-
-        .csm-tab{background:transparent;color:#9aaaca;border:0;border-radius:6px;padding:7px 12px;font-size:12px;cursor:pointer}
-
-        .csm-tab.active{background:#325ff0;color:white;font-weight:700}
-
-        .csm-scroll{overflow-x:auto}
-
-        table{width:100%;border-collapse:collapse;min-width:550px;font-size:12px;text-align:left}
-
-        th{color:#8ea0bf;text-transform:uppercase;font-size:10px;letter-spacing:.07em;font-weight:700;background:#0c162b}
-
-        th,td{padding:13px 15px;border-bottom:1px solid #26334d;white-space:nowrap}
-
-        td:nth-child(n+2),th:nth-child(n+2){text-align:right}
-
-        .csm-data-row:hover{background:#162540}
-
-        .csm-expand{background:#1c2d4b;border:1px solid #354768;color:#dce6ff;border-radius:6px;width:25px;height:25px;cursor:pointer;font-size:17px;line-height:1}
-
-        .csm-negative{color:#ff9292}
-
-        .csm-details-row td{white-space:normal;text-align:left;background:#0c162b;padding:16px}
-
-        .csm-details{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
-
-        .csm-details div{display:flex;flex-direction:column;gap:4px;min-width:0}
-
-        .csm-details span{color:#8da0be;font-size:11px}
-
-        .csm-details strong{font-size:12px;overflow-wrap:anywhere}
-
-        tfoot td{font-weight:800;background:#142342;border-bottom:0}
-
-        .csm-empty{padding:38px 16px;text-align:center;color:#aab8d1;font-size:13px}
-
-        .csm-error{margin:16px;padding:14px;border:1px solid #85444e;border-radius:9px;color:#ffb4ba;background:#3a1c2b;font-size:13px}
-
-        .csm-error small{display:inline-block;margin-top:7px}
-
-        .csm-footnote{margin-top:12px;line-height:1.6}
-
-        @media(max-width:650px){.csm-heading{flex-direction:column}.csm-toolbar{padding:12px}.csm-details{grid-template-columns:repeat(2,minmax(0,1fr))}th,td{padding:11px 12px}}
-
-      `}</style>
-
-    </section>
-
-  );
-
+  }, [apiBase, authLoading, token, user?.role, days, refresh]);
+  const rows = useMemo(() => [...(payload?.daily || [])].reverse(), [payload]);
+  return <section className="csm-root">
+    <header className="csm-heading"><div><h2>{title}</h2><p>Pricing, profit tracking, users, and order monitoring.</p></div></header>
+    <div className="csm-panel">
+      <div className="csm-toolbar"><strong>7d metric</strong><div className="csm-controls">
+        {[7, 14, 30].map((value) => <button key={value} type="button" aria-pressed={days === value} className={days === value ? 'active' : ''} onClick={() => setDays(value)}>{value}d</button>)}
+        <button type="button" aria-label="Refresh metrics" onClick={reload} disabled={loading}>↻</button>
+      </div></div>
+      {error && <div className="csm-error" role="alert">{error}</div>}
+      {loading && <div className="csm-info">Loading metrics…</div>}
+      {!loading && !error && <div className="csm-scroll" tabIndex={0} aria-label="Scrollable daily metrics table">
+        <table><thead><tr>{FIELDS.map(([key, label]) => <th key={key} scope="col">{label}</th>)}</tr></thead>
+        <tbody>{rows.map((row) => <tr key={row.date}>{FIELDS.map(([key, , kind]) => <td key={key} className={key.startsWith('profit') ? 'csm-profit' : ''}>{display(row, key, kind)}</td>)}</tr>)}</tbody>
+        <tfoot><tr>{FIELDS.map(([key, , kind]) => <td key={key} className={key.startsWith('profit') ? 'csm-profit' : ''}>{key === 'date' ? 'Total' : display(payload?.totals, key, kind)}</td>)}</tr></tfoot>
+        </table></div>}
+    </div>
+    <p className="csm-note">NGN · Africa/Lagos. Each row tracks customers who signed up on that date; balances are their current live wallet balances. Swipe sideways on mobile to see all columns.</p>
+    <style jsx>{`
+      .csm-root{color:#e6edff;width:100%;min-width:0}.csm-heading{margin-bottom:22px}.csm-heading h2{font-size:clamp(21px,2.4vw,28px);margin:0 0 6px;font-weight:750}.csm-heading p,.csm-note{color:#93a3c2;font-size:12px;margin:0}.csm-panel{background:#111c33;border:1px solid #263958;border-radius:15px;overflow:hidden}.csm-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 18px;border-bottom:1px solid #263958}.csm-toolbar strong{font-size:15px}.csm-controls{display:flex;gap:6px}.csm-controls button{background:#15223d;color:#aebdd8;border:1px solid #2b3a59;border-radius:9px;padding:9px 12px;cursor:pointer}.csm-controls button.active{background:#315ef1;color:white;border-color:#315ef1}.csm-controls button:disabled{opacity:.5}.csm-scroll{width:100%;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}.csm-scroll table{border-collapse:collapse;width:100%;min-width:1550px;font-size:13px}.csm-scroll th,.csm-scroll td{padding:15px 16px;text-align:right;white-space:nowrap;border-bottom:1px solid #273753}.csm-scroll th:first-child,.csm-scroll td:first-child{text-align:left;position:sticky;left:0;background:#111c33;z-index:1}.csm-scroll th{background:#0d192e;text-transform:uppercase;letter-spacing:.045em;color:#9daeca;font-size:11px}.csm-scroll th:first-child{background:#0d192e;z-index:2}.csm-scroll tbody tr:hover td{background:#182944}.csm-scroll tfoot td{background:#172744;font-weight:750;border-bottom:0}.csm-scroll tfoot td:first-child{background:#172744}.csm-profit{color:#71d6a7}.csm-pct{color:#879bbd;font-size:11px;margin-left:3px}.csm-info{padding:35px;text-align:center;color:#9bacc9}.csm-error{margin:15px;padding:15px;border:1px solid #8b354c;border-radius:9px;background:#391e2e;color:#ffb5c1}.csm-note{margin-top:12px;line-height:1.6}@media(max-width:640px){.csm-toolbar{padding:12px}.csm-controls button{padding:8px 10px}}
+    `}</style>
+  </section>;
 }
-
-
-
-// A local fragment alias avoids an additional React default import.
-
-import { Fragment as ReactFragment } from "react";
