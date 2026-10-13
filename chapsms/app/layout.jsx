@@ -17,6 +17,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <head>
         <TikTokPixel />
+         <SnapPixel />
       </head>
       <body>
         <Suspense fallback={null}>
