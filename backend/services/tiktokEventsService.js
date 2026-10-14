@@ -18,6 +18,8 @@ function getPixelConfigurations() {
   const definitions = [
     { pixelKey: "TIKTOK_PIXEL_ID", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN" },
     { pixelKey: "TIKTOK_PIXEL_ID_2", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_2" },
+    { pixelKey: "TIKTOK_PIXEL_ID_3", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_3" },
+    { pixelKey: "TIKTOK_PIXEL_ID_4", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_4" },
   ];
 
   return definitions.map(({ pixelKey, tokenKey }) => {
@@ -158,7 +160,7 @@ async function sendTikTokWebEvent({
   return {
     success: true,
     testMode: Boolean(testEventCode),
-    response: results[0].response, // Retains compatibility with single-pixel callers.
+    response: results[0].response,
     results,
   };
 }
