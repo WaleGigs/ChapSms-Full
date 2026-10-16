@@ -16,7 +16,7 @@ const {
 
 // Only accept known acquisition sources; never trust arbitrary client labels.
 function acquisitionFields(input = {}) {
-  const allowed = new Set(["snapchat", "tiktok", "organic", "direct", "other"]);
+  const allowed = new Set(["snapchat", "tiktok", "instagram", "facebook", "organic", "direct", "other"]);
   const source = String(input.registrationSource || "direct").trim().toLowerCase();
   const safe = (value, max) => String(value || "").trim().slice(0, max);
   return {
