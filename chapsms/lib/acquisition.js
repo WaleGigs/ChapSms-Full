@@ -1,6 +1,7 @@
 "use client";
 
-const KEY = "chapsms_first_touch_v1";
+// Last identifiable campaign touch: a new explicit campaign replaces an older one.
+const KEY = "chapsms_first_touch_v1"; // Retain key to migrate existing browser data.
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const EMPTY = { registrationSource: "direct", registrationMedium: "", registrationCampaign: "", snapClickId: "", tiktokClickId: "" };
 const trim = (value, length) => String(value || "").trim().slice(0, length);
@@ -9,13 +10,15 @@ function readSaved() {
   try {
     const value = JSON.parse(window.localStorage.getItem(KEY) || "null");
     if (!value || typeof value !== "object") return null;
-    if (value.capturedAt && Date.now() - value.capturedAt > MAX_AGE_MS) return null;
+    if (!Number.isFinite(value.capturedAt) || Date.now() - value.capturedAt > MAX_AGE_MS || value.capturedAt > Date.now()) return null;
     return value;
   } catch { return null; }
 }
 
 export function getAcquisition() {
   if (typeof window === "undefined") return { ...EMPTY };
+  // Also capture here so a signup action uses the latest URL even if a page effect has not run yet.
+  captureAcquisition();
   const value = readSaved();
   if (!value) return { ...EMPTY };
   return {
@@ -37,33 +40,49 @@ export function captureAcquisition() {
     const tiktokClickId = trim(params.get("ttclid"), 512);
     const fbclid = trim(params.get("fbclid"), 512);
     const paid = /^(paid|paid_social|cpc|ppc|ads?|social_paid)$/.test(medium);
+
     let source = "";
-    if (snapClickId || /^(snapchat|snap)$/.test(utm)) source = "snapchat";
-    else if (tiktokClickId || /^(tiktok|tik_tok)$/.test(utm)) source = "tiktok";
+    // Explicit UTM source wins over stray click IDs from other platforms.
+    if (/^(snapchat|snap)$/.test(utm)) source = "snapchat";
+    else if (/^(tiktok|tik_tok)$/.test(utm)) source = "tiktok";
     else if (/^(instagram|ig)$/.test(utm)) source = paid ? "instagram" : "organic";
     else if (/^(facebook|fb|meta)$/.test(utm)) source = paid ? "facebook" : "organic";
     else if (utm) source = "other";
-    else if (fbclid) source = "other"; // fbclid alone does not identify Instagram versus Facebook.
-    else if (document.referrer) {
+    else if (snapClickId) source = "snapchat";
+    else if (tiktokClickId) source = "tiktok";
+    else if (fbclid) source = "other"; // fbclid does not distinguish Facebook from Instagram.
+
+    const previous = readSaved();
+    if (source) {
+      // New tagged campaign replaces old attribution; a revisit to the same tagged URL
+      // does not reset its timestamp or needlessly rewrite browser storage.
+      const campaign = trim(params.get("utm_campaign"), 200);
+      if (previous && previous.registrationSource === source &&
+          previous.registrationMedium === medium &&
+          previous.registrationCampaign === campaign &&
+          previous.snapClickId === snapClickId &&
+          previous.tiktokClickId === tiktokClickId) return;
+      window.localStorage.setItem(KEY, JSON.stringify({
+        registrationSource: source,
+        registrationMedium: medium,
+        registrationCampaign: campaign,
+        snapClickId: source === "snapchat" ? snapClickId : "",
+        tiktokClickId: source === "tiktok" ? tiktokClickId : "",
+        capturedAt: Date.now(),
+      }));
+      return;
+    }
+
+    // An untagged internal page or direct return must not erase the latest campaign.
+    if (previous) return;
+    let fallback = "direct";
+    if (document.referrer) {
       try {
         const ref = new URL(document.referrer);
-        if (ref.hostname !== window.location.hostname) source = "organic";
-      } catch { /* Ignore malformed referrer */ }
+        if (ref.origin !== window.location.origin) fallback = "organic";
+      } catch { /* Ignore invalid referrer */ }
     }
-    const previous = readSaved();
-    // A prior untagged visit should not permanently mask a later tagged ad visit.
-    // Keep the earliest identifiable source, but upgrade legacy/default direct values.
-    if (previous && previous.registrationSource && previous.registrationSource !== "direct" && previous.registrationSource !== "other") return;
-    if (previous && !source) return;
-    const data = {
-      registrationSource: source || "direct",
-      registrationMedium: trim(medium, 100),
-      registrationCampaign: trim(params.get("utm_campaign"), 200),
-      snapClickId,
-      tiktokClickId,
-      capturedAt: Date.now(),
-    };
-    window.localStorage.setItem(KEY, JSON.stringify(data));
+    window.localStorage.setItem(KEY, JSON.stringify({ ...EMPTY, registrationSource: fallback, capturedAt: Date.now() }));
   } catch { /* Attribution failure must never interrupt authentication. */ }
 }
 
