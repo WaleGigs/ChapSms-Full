@@ -6,6 +6,7 @@ import ThemeProvider from "@/components/ThemeProvider";
 import { Toaster } from "react-hot-toast";
 import TikTokPixel from "@/components/analytics/TikTokPixel";
 import SnapPixel from "@/components/analytics/SnapPixel";
+import AcquisitionCapture from "@/components/analytics/AcquisitionCapture";
 
 export const metadata = {
   title: "ChapsSmS",
@@ -15,12 +16,10 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <head>
-        <TikTokPixel />
-         <SnapPixel />
-      </head>
       <body>
         <Suspense fallback={null}>
+          <AcquisitionCapture />
+          <TikTokPixel />
           <SnapPixel />
         </Suspense>
         <ThemeProvider>

@@ -480,6 +480,18 @@ export default function AdminUsersPage() {
 
 
 
+  function sourceInfo(value) {
+    const source = String(value || "").trim().toLowerCase();
+    if (source === "snapchat") return { label: "Snapchat Ads", className: "bg-yellow-50 text-yellow-800" };
+    if (source === "tiktok") return { label: "TikTok Ads", className: "bg-slate-900 text-white" };
+    if (source === "instagram") return { label: "Instagram", className: "bg-pink-50 text-pink-700" };
+    if (source === "facebook") return { label: "Facebook", className: "bg-indigo-50 text-indigo-700" };
+    if (source === "organic") return { label: "Organic", className: "bg-emerald-50 text-emerald-700" };
+    if (source === "direct") return { label: "Direct", className: "bg-blue-50 text-blue-700" };
+    if (source === "other") return { label: "Other", className: "bg-slate-100 text-slate-600" };
+    return { label: "Unknown", className: "bg-slate-100 text-slate-500" };
+  }
+
   return (
 
     <div className="mx-auto w-full max-w-6xl">
@@ -638,6 +650,8 @@ export default function AdminUsersPage() {
 
 
 
+                    <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-400">Registration source</th>
+
                     <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-400">
 
                       Role
@@ -741,6 +755,12 @@ export default function AdminUsersPage() {
                           </div>
 
                         </td>
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-bold ${sourceInfo(user.registrationSource).className}`}>
+                            {sourceInfo(user.registrationSource).label}
+                          </span>
+                        </td>
+
 
 
 
@@ -1141,6 +1161,10 @@ export default function AdminUsersPage() {
 
 
                     <div className="mt-4 flex flex-wrap gap-2">
+                      <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${sourceInfo(user.registrationSource).className}`}>
+                        {sourceInfo(user.registrationSource).label}
+                      </span>
+
 
                       <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
 

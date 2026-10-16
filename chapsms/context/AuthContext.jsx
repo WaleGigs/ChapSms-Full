@@ -532,9 +532,7 @@ export function AuthProvider({ children }) {
 
   const signup = useCallback(
 
-    (payload) =>
-
-      authService.register(payload),
+    (payload) => authService.register({ ...payload, ...getAcquisition() }),
 
     []
 
