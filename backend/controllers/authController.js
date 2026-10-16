@@ -14,6 +14,20 @@ const {
   sendPasswordResetEmail,
 } = require("../services/email.service");
 
+// Only accept known acquisition sources; never trust arbitrary client labels.
+function acquisitionFields(input = {}) {
+  const allowed = new Set(["snapchat", "tiktok", "organic", "direct", "other"]);
+  const source = String(input.registrationSource || "direct").trim().toLowerCase();
+  const safe = (value, max) => String(value || "").trim().slice(0, max);
+  return {
+    registrationSource: allowed.has(source) ? source : "other",
+    registrationMedium: safe(input.registrationMedium, 100),
+    registrationCampaign: safe(input.registrationCampaign, 200),
+    snapClickId: safe(input.snapClickId, 512),
+    tiktokClickId: safe(input.tiktokClickId, 512),
+  };
+}
+
 const VERIFICATION_CODE_EXPIRY_MINUTES = 10;
 const VERIFICATION_RESEND_COOLDOWN_SECONDS = 60;
 const PASSWORD_RESET_EXPIRY_MINUTES = 10;
@@ -119,6 +133,7 @@ function serializeUser(
     suspended: user.suspended,
     isVerified: user.isVerified,
     authProvider: user.authProvider,
+    registrationSource: user.registrationSource || "direct",
     lastLogin: user.lastLogin,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -372,6 +387,7 @@ exports.register = async (req, res) => {
         email,
         password: hashedPassword,
         authProvider: "local",
+        ...acquisitionFields(req.body),
         isVerified: false,
         verificationCodeHash:
           hashToken(
@@ -935,6 +951,8 @@ exports.googleAuth = async (
           ""
       ).trim() || null;
 
+    const isNewUser = !user;
+
     if (!user) {
       const username =
         await createUniqueGoogleUsername({
@@ -945,6 +963,7 @@ exports.googleAuth = async (
       user = await User.create({
         googleId,
         authProvider: "google",
+        ...acquisitionFields(req.body),
         username,
         firstName,
         lastName,
@@ -1014,6 +1033,7 @@ exports.googleAuth = async (
       success: true,
       message:
         "Google authentication successful",
+      isNewUser,
       token,
       user: serializeUser(
         user,
