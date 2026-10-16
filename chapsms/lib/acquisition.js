@@ -94,7 +94,14 @@ export function trackSnapPurchase(tx) {
   if (typeof window === "undefined" || !window.snaptr) return false;
   const ref = trim(tx?.reference, 200);
   const price = Number(tx?.amount);
-  if (!ref || !Number.isFinite(price) || price <= 0) return false;
+  if (
+    tx?.type !== "deposit" ||
+    tx?.status !== "completed" ||
+    tx?.environment !== "live" ||
+    !["neurapay", "flutterwave"].includes(tx?.paymentGateway) ||
+    String(tx?.currency || "NGN").toUpperCase() !== "NGN" ||
+    !ref || !Number.isFinite(price) || price <= 0
+  ) return false;
   const key = `chapsms_snap_purchase_${ref}`;
   try { if (window.localStorage.getItem(key)) return false; } catch {}
   window.snaptr("track", "PURCHASE", { price, currency: "NGN", transaction_id: ref });

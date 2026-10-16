@@ -84,15 +84,28 @@ export default function WalletPage() {
   const [neurapayLoaded, setNeurapayLoaded] = useState(false);
 
   const checkoutTrackedRef = useRef(new Set());
+  // Baseline existing deposits; only report deposits first seen AFTER the initial wallet load.
+  // The backend is authoritative for completion; this effect never credits money.
   const observedDepositsRef = useRef(null);
   useEffect(() => {
     const transactions = Array.isArray(wallet?.transactions) ? wallet.transactions : null;
     if (!transactions) return;
-    const eligible = transactions.filter((tx) => tx?.type === "deposit" && tx?.paymentGateway === "neurapay" && tx?.status === "completed" && tx?.environment === "live" && tx?.reference);
-    const refs = new Set(eligible.map((tx) => String(tx.reference)));
-    if (observedDepositsRef.current === null) { observedDepositsRef.current = refs; return; }
+    const eligible = transactions.filter((tx) =>
+      tx?.type === "deposit" &&
+      tx?.status === "completed" &&
+      tx?.environment === "live" &&
+      ["neurapay", "flutterwave"].includes(tx?.paymentGateway) &&
+      String(tx?.currency || "NGN").toUpperCase() === "NGN" &&
+      tx?.reference && Number(tx?.amount) > 0
+    );
+    const refs = new Set(eligible.map((tx) => String(tx.reference).trim().toUpperCase()));
+    if (observedDepositsRef.current === null) {
+      observedDepositsRef.current = refs;
+      return;
+    }
     for (const tx of eligible) {
-      if (!observedDepositsRef.current.has(String(tx.reference))) trackSnapPurchase(tx);
+      const ref = String(tx.reference).trim().toUpperCase();
+      if (!observedDepositsRef.current.has(ref)) trackSnapPurchase(tx);
     }
     observedDepositsRef.current = refs;
   }, [wallet?.transactions]);
