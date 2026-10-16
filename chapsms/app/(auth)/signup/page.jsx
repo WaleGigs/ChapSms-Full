@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { captureAcquisition, getAcquisition, trackSnapSignUp } from "@/lib/acquisition";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Mail, UserRound } from "lucide-react";
@@ -45,6 +46,7 @@ function validatePassword(password) {
 
 export default function SignupPage() {
   const router = useRouter();
+  useEffect(() => { captureAcquisition(); }, []);
   const { signup, googleLogin } = useAuth();
 
   const [form, setForm] = useState({
@@ -176,8 +178,10 @@ export default function SignupPage() {
           email,
           password:
             form.password,
+          ...getAcquisition(),
         });
 
+      trackSnapSignUp();
       toast.success(
         response?.message ||
           "Account created. Check your email for the verification code."
@@ -207,6 +211,7 @@ export default function SignupPage() {
       setGoogleLoading(true);
       setSubmitError("");
       const response = await googleLogin(credential, { rememberMe: true });
+      if (response?.isNewUser) trackSnapSignUp();
       toast.success(response?.message || "Google sign-in successful");
 
       const requestedPath = new URLSearchParams(window.location.search).get("next") || "";

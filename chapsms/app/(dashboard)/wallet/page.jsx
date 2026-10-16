@@ -16,6 +16,7 @@ import Button from "@/components/ui/Button";
 import { useWallet } from "@/hooks/useWallet";
 import { neurapayService } from "@/services/neurapayService";
 import { trackInitiateCheckout } from "@/lib/tiktokEvents";
+import { trackSnapPurchase } from "@/lib/acquisition";
 
 const presetAmounts = [500, 1000, 2000, 5000, 10000, 20000];
 
@@ -83,6 +84,18 @@ export default function WalletPage() {
   const [neurapayLoaded, setNeurapayLoaded] = useState(false);
 
   const checkoutTrackedRef = useRef(new Set());
+  const observedDepositsRef = useRef(null);
+  useEffect(() => {
+    const transactions = Array.isArray(wallet?.transactions) ? wallet.transactions : null;
+    if (!transactions) return;
+    const eligible = transactions.filter((tx) => tx?.type === "deposit" && tx?.paymentGateway === "neurapay" && tx?.status === "completed" && tx?.environment === "live" && tx?.reference);
+    const refs = new Set(eligible.map((tx) => String(tx.reference)));
+    if (observedDepositsRef.current === null) { observedDepositsRef.current = refs; return; }
+    for (const tx of eligible) {
+      if (!observedDepositsRef.current.has(String(tx.reference))) trackSnapPurchase(tx);
+    }
+    observedDepositsRef.current = refs;
+  }, [wallet?.transactions]);
   const numericAmount = useMemo(() => Number(amount) || 0, [amount]);
 
   function trackCheckoutOnce(key, details) {

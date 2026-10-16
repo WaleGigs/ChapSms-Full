@@ -19,6 +19,7 @@ import {
 } from "react";
 
 import { authService } from "@/services/auth.service";
+import { getAcquisition } from "@/lib/acquisition";
 
 const AuthContext = createContext(null);
 
@@ -585,7 +586,8 @@ export function AuthProvider({ children }) {
 
         await authService.google(
 
-          credential
+          credential,
+          getAcquisition()
 
         );
 

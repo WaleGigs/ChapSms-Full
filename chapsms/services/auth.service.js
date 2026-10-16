@@ -660,7 +660,9 @@ export function login(
 
 export function googleAuth(
 
-  credential
+  credential,
+
+  acquisition = {}
 
 ) {
 
@@ -675,6 +677,8 @@ export function googleAuth(
       body: {
 
         credential,
+
+        ...acquisition,
 
       },
 
