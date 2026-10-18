@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { authService } from "@/services/auth.service";
 import { getAcquisition, trackSnapSignUp } from "@/lib/acquisition";
+import { trackCompleteRegistration } from "@/lib/tiktokEvents";
 
 const AuthContext = createContext(null);
 const TOKEN_KEYS = ["chapsms-token", "chapsms_token", "authToken", "token"];
@@ -74,6 +75,16 @@ function trackNewAccount(response) {
   } catch (error) {
     console.warn("Snapchat signup tracking failed:", error);
   }
+}
+
+// A registration is complete once the account is usable: on signup with email
+// verification off, or a new Google account. The verify-email page covers the rest.
+// The event ID matches the backend Events API copy so TikTok counts it once.
+function trackTikTokRegistration(response) {
+  const user = response?.user;
+  const id = String(user?._id || user?.id || "").trim();
+  if (!id || user?.role === "admin") return;
+  trackCompleteRegistration({ eventId: response?.registrationEventId || `registration_${id}` });
 }
 
 export function AuthProvider({ children }) {
@@ -169,7 +180,10 @@ export function AuthProvider({ children }) {
     // to move this call to the email-verification success handler instead.
     trackNewAccount(response);
     // With email verification off the account is ready and comes with a token.
-    if (response?.token) return establishSession(response, true);
+    if (response?.token) {
+      trackTikTokRegistration(response);
+      return establishSession(response, true);
+    }
     return response;
   }, [establishSession]);
 
@@ -182,7 +196,10 @@ export function AuthProvider({ children }) {
     const response = await authService.google(credential, getAcquisition());
     const result = establishSession(response, rememberMe);
     // Existing Google users must NEVER generate another SIGN_UP event.
-    if (response?.isNewUser === true) trackNewAccount(response);
+    if (response?.isNewUser === true) {
+      trackNewAccount(response);
+      trackTikTokRegistration(response);
+    }
     return result;
   }, [establishSession]);
 
