@@ -15,8 +15,21 @@ import {
 import Button from "@/components/ui/Button";
 import { useWallet } from "@/hooks/useWallet";
 import { neurapayService } from "@/services/neurapayService";
-import { trackInitiateCheckout } from "@/lib/tiktokEvents";
+import { trackInitiateCheckout, trackWalletFundingPurchase } from "@/lib/tiktokEvents";
 import { trackSnapPurchase } from "@/lib/acquisition";
+
+// Mirrors trackSnapPurchase's per-reference dedupe so a reload or second tab cannot re-report.
+function trackTikTokPurchaseOnce(tx, ref) {
+  const key = `chapsms_tiktok_purchase_${ref}`;
+  try { if (window.localStorage.getItem(key)) return; } catch {}
+  const sent = trackWalletFundingPurchase({
+    value: tx.amount,
+    currency: "NGN",
+    gateway: tx.paymentGateway,
+    reference: ref,
+  });
+  if (sent) { try { window.localStorage.setItem(key, "1"); } catch {} }
+}
 
 const presetAmounts = [500, 1000, 2000, 5000, 10000, 20000];
 
@@ -105,7 +118,9 @@ export default function WalletPage() {
     }
     for (const tx of eligible) {
       const ref = String(tx.reference).trim().toUpperCase();
-      if (!observedDepositsRef.current.has(ref)) trackSnapPurchase(tx);
+      if (observedDepositsRef.current.has(ref)) continue;
+      trackSnapPurchase(tx);
+      trackTikTokPurchaseOnce(tx, ref);
     }
     observedDepositsRef.current = refs;
   }, [wallet?.transactions]);

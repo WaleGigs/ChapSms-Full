@@ -5,10 +5,11 @@ function getTikTokQueue() {
   return window.ttq;
 }
 
-export function trackTikTokEvent(eventName, parameters = {}) {
+export function trackTikTokEvent(eventName, parameters = {}, options) {
   const ttq = getTikTokQueue();
   if (!ttq || typeof ttq.track !== "function") return false;
-  ttq.track(eventName, parameters);
+  if (options) ttq.track(eventName, parameters, options);
+  else ttq.track(eventName, parameters);
   return true;
 }
 
@@ -60,7 +61,7 @@ export function trackWalletFundingPurchase({
     description: gateway
       ? `ChapsSms wallet funded via ${gateway}`
       : "ChapsSms wallet funded",
-  });
+  }, reference ? { event_id: String(reference) } : undefined);
 }
 
 export function trackNumberPurchased({

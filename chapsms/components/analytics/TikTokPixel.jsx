@@ -76,6 +76,8 @@ const PIXEL_CODE = `
 }(window, document, "ttq");
 `;
 
+// Rendered in the root layout's <head> so it ships in the server HTML and runs on page load.
+// Keep it out of any Suspense boundary: React inserts client-rendered inline scripts inert.
 export default function TikTokPixel() {
   return (
     <script
