@@ -27,7 +27,6 @@ import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import PasswordField from "@/components/auth/PasswordField";
 import GoogleAuthButton from "@/components/auth/GoogleAuthButton";
-import DemoLoginButtons from "@/components/auth/DemoLoginButtons";
 
 import {
   normalizeEmail,
@@ -238,29 +237,19 @@ export default function LoginPage() {
       return;
     }
 
-    await loginWithCredentials({
-      email: form.email,
-      password: form.password,
-    });
-  }
-
-  async function loginWithCredentials({
-    email: rawEmail,
-    password,
-  }) {
     const email =
       normalizeEmail(
-        rawEmail
+        form.email
       );
 
     try {
       setLoading(true);
-      setSubmitError("");
 
       const response =
         await login({
           email,
-          password,
+          password:
+            form.password,
           rememberMe:
             form.rememberMe,
         });
@@ -475,25 +464,6 @@ export default function LoginPage() {
             : "Login"}
         </Button>
       </form>
-
-      <DemoLoginButtons
-        onSelect={(credentials) => {
-          if (
-            loading ||
-            googleLoading
-          ) {
-            return;
-          }
-
-          loginWithCredentials(
-            credentials
-          );
-        }}
-        disabled={
-          loading ||
-          googleLoading
-        }
-      />
 
       <p className="mt-6 text-center text-sm text-[var(--muted-foreground)]">
         Don&apos;t have an account?{" "}
