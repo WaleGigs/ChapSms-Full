@@ -168,8 +168,10 @@ export function AuthProvider({ children }) {
     // If your backend creates an unverified pending account, decide whether
     // to move this call to the email-verification success handler instead.
     trackNewAccount(response);
+    // With email verification off the account is ready and comes with a token.
+    if (response?.token) return establishSession(response, true);
     return response;
-  }, []);
+  }, [establishSession]);
 
   const login = useCallback(async (payload) => {
     const response = await authService.login({ email: payload.email, password: payload.password });

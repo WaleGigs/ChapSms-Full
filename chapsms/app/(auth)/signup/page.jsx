@@ -198,10 +198,12 @@ export default function SignupPage() {
       );
 
       if (response?.verificationRequired === false) {
-        router.push(
-          `/login?email=${encodeURIComponent(
-            email
-          )}`
+        router.replace(
+          response?.token
+            ? "/dashboard"
+            : `/login?email=${encodeURIComponent(
+                email
+              )}`
         );
         return;
       }

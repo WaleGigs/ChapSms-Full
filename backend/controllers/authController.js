@@ -434,13 +434,22 @@ exports.register = async (req, res) => {
       throw walletError;
     }
 
+    // No verification step: sign the new user straight in.
     if (!verificationRequired) {
+      createdUser.lastLogin = now;
+
+      void User.updateOne(
+        { _id: createdUser._id },
+        { $set: { lastLogin: now } }
+      ).catch(() => {});
+
       return res.status(201).json({
         success: true,
         code: "ACCOUNT_CREATED",
         verificationRequired: false,
         message:
-          "Account created successfully. You can sign in now.",
+          "Account created successfully. Welcome to ChapsSmS!",
+        token: generateToken(createdUser),
         user: serializeUser(
           createdUser,
           wallet.balance
