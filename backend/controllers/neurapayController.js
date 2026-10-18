@@ -16,6 +16,10 @@ const {
   normalizeProviderChannel,
 } = require("../services/neurapayService");
 
+const {
+  reportDepositPurchase,
+} = require("../services/tiktokEventsService");
+
 function requireEnvironment(
   name
 ) {
@@ -758,6 +762,20 @@ async function verifyAndCredit({
       creditedAmount;
 
     await record.save();
+  }
+
+  // Only the call that actually credited the wallet reports the conversion.
+  if (!alreadyCredited) {
+    reportDepositPurchase({
+      userId:
+        account.user,
+      reference:
+        referenceForWallet,
+      amount:
+        creditedAmount,
+      gateway:
+        "NeuraPay",
+    });
   }
 
   return {

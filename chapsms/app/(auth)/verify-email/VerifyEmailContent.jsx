@@ -343,8 +343,14 @@ export default function VerifyEmailContent() {
        * Do not fire this on the signup form itself, because users who
        * never verify their email should not be counted as completed
        * registrations.
+       *
+       * The backend reports the same event through the Events API with
+       * this event ID, so TikTok counts the two copies once.
        */
-      trackCompleteRegistration();
+      trackCompleteRegistration({
+        eventId:
+          response?.registrationEventId,
+      });
 
       toast.success(
         response?.message ||

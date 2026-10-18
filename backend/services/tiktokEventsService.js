@@ -15,21 +15,34 @@ function configurationError(message) {
 }
 
 function getPixelConfigurations() {
+  // Hardcoded so the live server works without environment setup.
+  // An environment variable with the same key still overrides each value.
   const definitions = [
-    { pixelKey: "TIKTOK_PIXEL_ID", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN" },
-    { pixelKey: "TIKTOK_PIXEL_ID_2", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_2" },
-    { pixelKey: "TIKTOK_PIXEL_ID_3", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_3" },
-    { pixelKey: "TIKTOK_PIXEL_ID_4", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_4" },
+    { pixelKey: "TIKTOK_PIXEL_ID", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN", pixelId: "D9UJK4BC77UDTFS1RGU0", accessToken: "c5601f294767e9467850b601381cdef185da9751" },
+    { pixelKey: "TIKTOK_PIXEL_ID_2", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_2", pixelId: "DB597OBC77U6DDDLBIT0", accessToken: "6b55305b0a7ef1e3efd4dca953082a83fe1ffeae" },
+    { pixelKey: "TIKTOK_PIXEL_ID_3", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_3", pixelId: "DB7Q4B3C77UAEK316HOG", accessToken: "256998d8ddc6728043ddf2333f22d8f97f5a3df3" },
+    { pixelKey: "TIKTOK_PIXEL_ID_4", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_4", pixelId: "DB7Q5KBC77UB6E0E936G", accessToken: "9760c0179416eefac2448ec314d7eb8e944bfa2d" },
+    { pixelKey: "TIKTOK_PIXEL_ID_5", tokenKey: "TIKTOK_EVENTS_API_ACCESS_TOKEN_5", pixelId: "DBAABF3C77UDN3PL3EDG", accessToken: "7d543b669b914bf530262300af62910c249b1401" },
   ];
 
-  return definitions.map(({ pixelKey, tokenKey }) => {
-    const pixelId = readEnvironment(pixelKey);
-    const accessToken = readEnvironment(tokenKey);
+  return definitions.map((definition) => {
+    const { pixelKey, tokenKey } = definition;
+    const pixelId = readEnvironment(pixelKey) || definition.pixelId;
+    const accessToken = readEnvironment(tokenKey) || definition.accessToken;
+    // A half-configured slot is skipped so it cannot block events to the other pixels.
     if (Boolean(pixelId) !== Boolean(accessToken)) {
-      throw configurationError(`Both ${pixelKey} and ${tokenKey} must be configured together`);
+      warnOnce(pixelKey, `[TikTok Events API] ${pixelKey} and ${tokenKey} must both be set; skipping this pixel`);
+      return null;
     }
     return pixelId ? { pixelId, accessToken } : null;
   }).filter(Boolean);
+}
+
+const warned = new Set();
+function warnOnce(key, message) {
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(message);
 }
 
 function isTikTokEventsApiConfigured() {
@@ -102,6 +115,10 @@ async function sendTikTokWebEvent({
   eventTime,
   email,
   externalId,
+  ttclid,
+  ttp,
+  ip,
+  userAgent,
   properties = {},
   pageUrl,
   pageReferrer,
@@ -117,6 +134,10 @@ async function sendTikTokWebEvent({
   const user = cleanObject({
     email: sha256(email),
     external_id: sha256(externalId),
+    ttclid: String(ttclid || "").trim(),
+    ttp: String(ttp || "").trim(),
+    ip: String(ip || "").trim(),
+    user_agent: String(userAgent || "").trim(),
   });
   if (Object.keys(user).length === 0) {
     const error = new Error("TikTok Events API requires a customer match key");
@@ -170,10 +191,12 @@ async function sendTikTokPurchase({
   eventTime,
   email,
   externalId,
+  ttclid,
   value,
   currency = "NGN",
   orderId,
-  pageUrl,
+  gateway = "NeuraPay",
+  pageUrl = readEnvironment("TIKTOK_EVENT_PAGE_URL") || "https://chapssms.com/wallet",
 }) {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -189,6 +212,7 @@ async function sendTikTokPurchase({
     eventTime,
     email,
     externalId,
+    ttclid,
     pageUrl,
     properties: {
       value: amount,
@@ -202,14 +226,95 @@ async function sendTikTokPurchase({
         price: amount,
       }],
       order_id: reference,
-      description: "ChapsSms wallet funding via NeuraPay",
+      description: `ChapsSms wallet funding via ${gateway}`,
       num_items: 1,
     },
   });
 }
 
+// Shared with the browser pixel so TikTok deduplicates the two copies of each event.
+function registrationEventId(userId) {
+  return `registration_${String(userId || "").trim()}`;
+}
+
+function purchaseEventId(reference) {
+  return String(reference || "").trim().toUpperCase();
+}
+
+function sendTikTokCompleteRegistration({
+  user,
+  req,
+  pageUrl,
+}) {
+  return sendTikTokWebEvent({
+    event: "CompleteRegistration",
+    eventId: registrationEventId(user?._id),
+    email: user?.email,
+    externalId: user?._id && String(user._id),
+    ttclid: user?.tiktokClickId,
+    ...requestMatchKeys(req),
+    pageUrl: pageUrl || req?.get?.("referer"),
+  });
+}
+
+function requestMatchKeys(req) {
+  if (!req) return {};
+  const forwarded = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
+  return {
+    ip: forwarded || req.ip || req.socket?.remoteAddress || "",
+    userAgent: req.get?.("user-agent") || "",
+    ttp: req.cookies?._ttp || "",
+  };
+}
+
+/*
+ * Report a newly credited live NGN deposit. Call only from the branch that actually
+ * credited the wallet, so retries and duplicate webhooks never report twice.
+ */
+function reportDepositPurchase({ userId, reference, amount, gateway, environment = "live", currency = "NGN" }) {
+  if (String(environment).toLowerCase() !== "live") return;
+  if (String(currency || "NGN").toUpperCase() !== "NGN") return;
+  reportInBackground(`Purchase ${purchaseEventId(reference)}`, async () => {
+    // Required lazily so this service stays loadable without the database layer.
+    const User = require("../models/User");
+    const user = await User.findById(userId).select("email +tiktokClickId role").lean();
+    if (!user || user.role === "admin") return null;
+    return sendTikTokPurchase({
+      eventId: purchaseEventId(reference),
+      email: user.email,
+      externalId: String(user._id),
+      ttclid: user.tiktokClickId,
+      value: amount,
+      currency: "NGN",
+      orderId: purchaseEventId(reference),
+      gateway,
+    });
+  });
+}
+
+/*
+ * Conversion reporting must never delay or fail a signup or a wallet credit.
+ * Callers do not await this; it logs failures and resolves.
+ */
+function reportInBackground(label, send) {
+  if (!isTikTokEventsApiConfigured()) return;
+  Promise.resolve()
+    .then(send)
+    .then((result) => {
+      if (result?.testMode) console.info(`[TikTok Events API] ${label} sent in test mode`);
+    })
+    .catch((error) => {
+      console.warn(`[TikTok Events API] ${label} failed:`, error?.results || error?.message || error);
+    });
+}
+
 module.exports = {
   isTikTokEventsApiConfigured,
+  purchaseEventId,
+  registrationEventId,
+  reportDepositPurchase,
+  reportInBackground,
+  sendTikTokCompleteRegistration,
   sendTikTokPurchase,
   sendTikTokWebEvent,
 };

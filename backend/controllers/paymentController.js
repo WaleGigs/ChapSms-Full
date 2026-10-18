@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const Payment = require("../models/Payment");
 const Wallet = require("../models/Wallet");
 const platformSettings = require("../services/platformSettingsService");
+const { reportDepositPurchase } = require("../services/tiktokEventsService");
 
 const FLW_BASE_URL =
   "https://api.flutterwave.com/v3";
@@ -789,6 +790,24 @@ async function creditVerifiedPayment({
 
     wallet =
       existingWallet;
+  } else {
+    // This call won the atomic credit, so it alone reports the conversion.
+    reportDepositPurchase({
+      userId:
+        payment.user,
+      reference:
+        payment.txRef,
+      amount:
+        Number(
+          payment.amount,
+        ),
+      gateway:
+        "Flutterwave",
+      environment:
+        paymentEnvironment,
+      currency:
+        payment.currency,
+    });
   }
 
   /*

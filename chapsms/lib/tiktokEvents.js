@@ -13,8 +13,12 @@ export function trackTikTokEvent(eventName, parameters = {}, options) {
   return true;
 }
 
-export function trackCompleteRegistration() {
-  return trackTikTokEvent("CompleteRegistration");
+export function trackCompleteRegistration({ eventId } = {}) {
+  return trackTikTokEvent(
+    "CompleteRegistration",
+    {},
+    eventId ? { event_id: String(eventId) } : undefined
+  );
 }
 
 export function trackInitiateCheckout({

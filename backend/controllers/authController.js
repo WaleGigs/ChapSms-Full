@@ -15,6 +15,18 @@ const {
 } = require("../services/email.service");
 const platformSettings = require("../services/platformSettingsService");
 const { MAINTENANCE_MESSAGE } = require("../middleware/maintenanceMiddleware");
+const {
+  registrationEventId,
+  reportInBackground,
+  sendTikTokCompleteRegistration,
+} = require("../services/tiktokEventsService");
+
+// A registration counts as complete once the account is verified and usable.
+function reportCompleteRegistration(user, req) {
+  reportInBackground(`CompleteRegistration ${user._id}`, () =>
+    sendTikTokCompleteRegistration({ user, req })
+  );
+}
 
 // Only accept known acquisition sources; never trust arbitrary client labels.
 function acquisitionFields(input = {}) {
@@ -443,10 +455,14 @@ exports.register = async (req, res) => {
         { $set: { lastLogin: now } }
       ).catch(() => {});
 
+      reportCompleteRegistration(createdUser, req);
+
       return res.status(201).json({
         success: true,
         code: "ACCOUNT_CREATED",
         verificationRequired: false,
+        registrationEventId:
+          registrationEventId(createdUser._id),
         message:
           "Account created successfully. Welcome to ChapsSmS!",
         token: generateToken(createdUser),
@@ -584,7 +600,7 @@ exports.verifyEmail = async (
       await User.findOne({
         email,
       }).select(
-        "+verificationCodeHash +verificationExpires +verificationLastSentAt +verificationResendAvailableAt"
+        "+verificationCodeHash +verificationExpires +verificationLastSentAt +verificationResendAvailableAt +tiktokClickId"
       );
 
     if (!user) {
@@ -652,10 +668,14 @@ exports.verifyEmail = async (
 
     await user.save();
 
+    reportCompleteRegistration(user, req);
+
     return res.json({
       success: true,
       message:
         "Email verified successfully. You can now log in.",
+      registrationEventId:
+        registrationEventId(user._id),
     });
   } catch (error) {
     console.error(
@@ -1049,6 +1069,8 @@ exports.googleAuth = async (
         apiKey: generateApiKey(),
         lastLogin: new Date(),
       });
+
+      reportCompleteRegistration(user, req);
     } else {
       user.googleId = googleId;
       user.googlePicture =
