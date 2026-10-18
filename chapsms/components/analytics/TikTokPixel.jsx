@@ -4,6 +4,7 @@ const PIXEL_IDS = [
   "DB597OBC77U6DDDLBIT0", // Existing Pixel 2
   "DB7Q4B3C77UAEK316HOG", // New Pixel 3
   "DB7Q5KBC77UB6E0E936G", // New Pixel 4
+  "DBAABF3C77UDN3PL3EDG", // New Pixel 5
 ];
 
 const PIXEL_CODE = `
