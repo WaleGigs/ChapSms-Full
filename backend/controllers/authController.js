@@ -13,6 +13,8 @@ const {
   sendVerificationEmail,
   sendPasswordResetEmail,
 } = require("../services/email.service");
+const platformSettings = require("../services/platformSettingsService");
+const { MAINTENANCE_MESSAGE } = require("../middleware/maintenanceMiddleware");
 
 // Only accept known acquisition sources; never trust arbitrary client labels.
 function acquisitionFields(input = {}) {
@@ -298,6 +300,18 @@ function getGoogleClient() {
 
 exports.register = async (req, res) => {
   try {
+    const settings =
+      await platformSettings.getSettings();
+
+    if (!settings.registrationEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: "REGISTRATION_DISABLED",
+        message:
+          "New account registration is currently closed.",
+      });
+    }
+
     const username =
       normalizeUsername(
         req.body.username
@@ -376,6 +390,9 @@ exports.register = async (req, res) => {
         12
       );
 
+    const verificationRequired =
+      settings.emailVerificationRequired;
+
     const verificationCode =
       generateOTP(6);
 
@@ -388,7 +405,7 @@ exports.register = async (req, res) => {
         password: hashedPassword,
         authProvider: "local",
         ...acquisitionFields(req.body),
-        isVerified: false,
+        isVerified: !verificationRequired,
         verificationCodeHash:
           hashToken(
             verificationCode
@@ -415,6 +432,20 @@ exports.register = async (req, res) => {
       }).catch(() => {});
 
       throw walletError;
+    }
+
+    if (!verificationRequired) {
+      return res.status(201).json({
+        success: true,
+        code: "ACCOUNT_CREATED",
+        verificationRequired: false,
+        message:
+          "Account created successfully. You can sign in now.",
+        user: serializeUser(
+          createdUser,
+          wallet.balance
+        ),
+      });
     }
 
     try {
@@ -456,6 +487,7 @@ exports.register = async (req, res) => {
     return res.status(201).json({
       success: true,
       code: "ACCOUNT_CREATED",
+      verificationRequired: true,
       emailDelivered: true,
       message:
         "Account created successfully. A verification code was sent to your email.",
@@ -953,6 +985,32 @@ exports.googleAuth = async (
 
     const isNewUser = !user;
 
+    const settings =
+      await platformSettings.getSettings();
+
+    if (
+      settings.maintenanceMode &&
+      user?.role !== "admin"
+    ) {
+      return res.status(503).json({
+        success: false,
+        code: "MAINTENANCE_MODE",
+        message: MAINTENANCE_MESSAGE,
+      });
+    }
+
+    if (
+      isNewUser &&
+      !settings.registrationEnabled
+    ) {
+      return res.status(403).json({
+        success: false,
+        code: "REGISTRATION_DISABLED",
+        message:
+          "New account registration is currently closed.",
+      });
+    }
+
     if (!user) {
       const username =
         await createUniqueGoogleUsername({
@@ -1152,7 +1210,24 @@ exports.login = async (
       });
     }
 
-    if (!user.isVerified) {
+    const settings =
+      await platformSettings.getSettings();
+
+    if (
+      settings.maintenanceMode &&
+      user.role !== "admin"
+    ) {
+      return res.status(503).json({
+        success: false,
+        code: "MAINTENANCE_MODE",
+        message: MAINTENANCE_MESSAGE,
+      });
+    }
+
+    if (
+      settings.emailVerificationRequired &&
+      !user.isVerified
+    ) {
       return res.status(403).json({
         success: false,
         code:

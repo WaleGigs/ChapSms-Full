@@ -3,6 +3,7 @@ const crypto = require("node:crypto");
 
 const Payment = require("../models/Payment");
 const Wallet = require("../models/Wallet");
+const platformSettings = require("../services/platformSettingsService");
 
 const FLW_BASE_URL =
   "https://api.flutterwave.com/v3";
@@ -1001,18 +1002,27 @@ exports.initializePayment =
           req.body.paymentMethod,
         );
 
+      const {
+        minimumWalletFunding,
+      } =
+        await platformSettings.getSettings();
+
       if (
         !Number.isFinite(
           amount,
         ) ||
-        amount < 100
+        amount <
+          minimumWalletFunding
       ) {
         return res
           .status(400)
           .json({
             success: false,
+            code:
+              "BELOW_MINIMUM_FUNDING",
+            minimumWalletFunding,
             message:
-              "Minimum funding amount is 100",
+              `Minimum funding amount is ₦${minimumWalletFunding.toLocaleString("en-NG")}`,
           });
       }
 

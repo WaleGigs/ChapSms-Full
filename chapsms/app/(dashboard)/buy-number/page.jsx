@@ -19,6 +19,7 @@ import { useOrders } from "@/hooks/useOrders";
 import { useWallet } from "@/hooks/useWallet";
 import { catalogService } from "@/services/catalogService";
 import { orderService } from "@/services/orderService";
+import { settingsService } from "@/services/settingsService";
 import { trackNumberPurchased } from "@/lib/tiktokEvents";
 
 import SearchableCountrySelect from "@/components/dashboard/SearchableCountrySelect";
@@ -553,6 +554,19 @@ export default function BuyNumberPage() {
   const blockedPollingRef = useRef(new Set());
   const expiryCheckedRef = useRef(new Set());
   const otpNotifiedRef = useRef(new Set());
+  const endedNotifiedRef = useRef(new Set());
+
+  // Admin "Order notifications" setting; on by default if it cannot load.
+  const orderNotificationsRef = useRef(true);
+
+  useEffect(() => {
+    settingsService
+      .getPublicSettings()
+      .then((settings) => {
+        orderNotificationsRef.current = settings?.orderNotificationsEnabled !== false;
+      })
+      .catch(() => {});
+  }, []);
 
   // Keep changing hook/context callbacks in refs so the 5-second polling callback
   // stays stable and is not reset by the 1-second countdown render.
@@ -790,9 +804,25 @@ export default function BuyNumberPage() {
         await refreshWalletRef.current?.();
       }
 
+      const notify = orderNotificationsRef.current;
+
       if (updatedOrder?.otpCode && !otpNotifiedRef.current.has(updatedId)) {
         otpNotifiedRef.current.add(updatedId);
-        toast.success(`${getOrderServiceName(updatedOrder)} OTP received`);
+        if (notify) {
+          toast.success(`${getOrderServiceName(updatedOrder)} OTP received`);
+        }
+      } else if (
+        updatedStatus === "expired" &&
+        !endedNotifiedRef.current.has(updatedId)
+      ) {
+        endedNotifiedRef.current.add(updatedId);
+        if (notify) {
+          toast(
+            `${getOrderServiceName(updatedOrder)} order expired${
+              updatedOrder?.refunded ? " and was refunded" : ""
+            }`
+          );
+        }
       } else if (showToast) {
         toast.success("Order refreshed");
       }

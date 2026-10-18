@@ -1,6 +1,7 @@
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import DashboardShell from "@/components/dashboard/DashboardShell";
 import WelcomeNoticeModal from "@/components/dashboard/WelcomeNoticeModal";
+import MaintenanceGate from "@/components/dashboard/MaintenanceGate";
 import { WalletProvider } from "@/context/WalletContext";
 
 export default function DashboardLayout({
@@ -8,6 +9,7 @@ export default function DashboardLayout({
 }) {
   return (
     <ProtectedRoute>
+      <MaintenanceGate>
       <WalletProvider>
         {/*
          * Render the actual application shell first.
@@ -25,6 +27,7 @@ export default function DashboardLayout({
          */}
         <WelcomeNoticeModal />
       </WalletProvider>
+      </MaintenanceGate>
     </ProtectedRoute>
   );
 }

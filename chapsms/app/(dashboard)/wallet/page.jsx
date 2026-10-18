@@ -15,6 +15,7 @@ import {
 import Button from "@/components/ui/Button";
 import { useWallet } from "@/hooks/useWallet";
 import { neurapayService } from "@/services/neurapayService";
+import { settingsService } from "@/services/settingsService";
 import { trackInitiateCheckout, trackWalletFundingPurchase } from "@/lib/tiktokEvents";
 import { trackSnapPurchase } from "@/lib/acquisition";
 
@@ -126,6 +127,18 @@ export default function WalletPage() {
   }, [wallet?.transactions]);
   const numericAmount = useMemo(() => Number(amount) || 0, [amount]);
 
+  const [minimumFunding, setMinimumFunding] = useState(100);
+
+  useEffect(() => {
+    settingsService
+      .getPublicSettings()
+      .then((settings) => {
+        const minimum = Number(settings?.minimumWalletFunding);
+        if (Number.isFinite(minimum) && minimum > 0) setMinimumFunding(minimum);
+      })
+      .catch(() => {});
+  }, []);
+
   function trackCheckoutOnce(key, details) {
     if (checkoutTrackedRef.current.has(key)) return;
     checkoutTrackedRef.current.add(key);
@@ -166,20 +179,20 @@ export default function WalletPage() {
   }, [account, refreshWallet]);
 
   useEffect(() => {
-    if (!account || numericAmount < 100) return;
+    if (!account || numericAmount < minimumFunding) return;
 
     trackCheckoutOnce(`neurapay:${numericAmount}`, {
       value: numericAmount,
       currency: "NGN",
       description: "ChapsSms NeuraPay bank-transfer funding started",
     });
-  }, [account, numericAmount]);
+  }, [account, numericAmount, minimumFunding]);
 
   async function handleCreateNeuraPayAccount() {
     if (creatingAccount) return;
 
-    if (!Number.isFinite(numericAmount) || numericAmount < 100) {
-      toast.error("Minimum funding amount is ₦100");
+    if (!Number.isFinite(numericAmount) || numericAmount < minimumFunding) {
+      toast.error(`Minimum funding amount is ₦${minimumFunding.toLocaleString("en-NG")}`);
       return;
     }
 
@@ -257,7 +270,7 @@ export default function WalletPage() {
         </div>
 
         <div className="mt-8 grid grid-cols-3 gap-2.5 sm:gap-3">
-          {presetAmounts.map((value) => {
+          {presetAmounts.filter((value) => value >= minimumFunding).map((value) => {
             const selected = numericAmount === value;
             return (
               <button
@@ -288,7 +301,7 @@ export default function WalletPage() {
               id="amount"
               name="amount"
               type="number"
-              min="100"
+              min={minimumFunding}
               step="1"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}

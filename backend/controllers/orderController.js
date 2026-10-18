@@ -8,6 +8,9 @@ const providerManager = require(
 const pricingService = require(
   "../services/pricingService"
 );
+const platformSettings = require(
+  "../services/platformSettingsService"
+);
 const automaticPricingService = require(
   "../services/automaticPricingService"
 );
@@ -311,9 +314,6 @@ function getWalletBalance(
 }
 
 
-const ORDER_ACTIVATION_TTL_MS =
-  20 * 60 * 1000;
-
 function getPositiveInteger(
   value,
   fallback,
@@ -338,11 +338,15 @@ function getPositiveInteger(
 
 function getOrderActivationTtlMs() {
   /*
-   * ChapsSms activations are a fixed 20-minute window.
-   * A stale/mistyped environment value must never turn this
-   * into 200 minutes.
+   * The activation window comes from the admin platform settings, which
+   * clamp it to 5–20 minutes (upstream activations never outlive 20).
    */
-  return ORDER_ACTIVATION_TTL_MS;
+  return (
+    platformSettings.getCachedSettings()
+      .orderTimeoutMinutes *
+    60 *
+    1000
+  );
 }
 
 function parseProviderDate(value) {
@@ -475,6 +479,25 @@ function getEffectiveOrderExpiresAt(order) {
 
   if (!startedAt) {
     return null;
+  }
+
+  /*
+   * Keep the window the order was bought with, so changing the admin
+   * timeout does not shorten or extend activations already running.
+   * Ignore stored values outside the 20-minute upstream maximum.
+   */
+  const storedExpiresAt =
+    parseProviderDate(order?.expiresAt);
+
+  if (
+    storedExpiresAt &&
+    storedExpiresAt.getTime() >
+      startedAt.getTime() &&
+    storedExpiresAt.getTime() <=
+      startedAt.getTime() +
+        20 * 60 * 1000
+  ) {
+    return storedExpiresAt;
   }
 
   return new Date(
@@ -3150,6 +3173,42 @@ async function reconcileOrderLifecycle(order) {
       providerOrder,
       terminalStatus: status,
     });
+  }
+
+  /*
+   * The admin order timeout can be shorter than the provider's own window.
+   * Once ChapsSms' window passes, cancel upstream and refund. If the
+   * provider refuses (e.g. an SMS just arrived), keep the order waiting.
+   */
+  if (
+    order.autoRefundEligible &&
+    orderExpiryHasPassed(order)
+  ) {
+    try {
+      const cancelResponse =
+        await providerManager.cancelOrder(
+          order.provider,
+          order.providerOrderId,
+        );
+
+      return refundTerminalProviderOrder({
+        order,
+        providerOrder: {
+          providerStatus: "STATUS_CANCEL",
+          raw: cancelResponse,
+        },
+        terminalStatus: "expired",
+      });
+    } catch (cancelError) {
+      console.warn(
+        "[Order lifecycle] timeout cancellation failed:",
+        {
+          orderId: String(order._id),
+          code: cancelError?.code,
+          message: cancelError?.message,
+        },
+      );
+    }
   }
 
   order.providerStatus =

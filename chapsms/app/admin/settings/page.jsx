@@ -16,13 +16,11 @@ import toast from "react-hot-toast";
 
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
-
-const STORAGE_KEY = "chapsms-admin-settings";
+import { settingsService } from "@/services/settingsService";
 
 const defaultSettings = {
   platformName: "ChapsSmS",
   supportEmail: "",
-  defaultCurrency: "NGN",
   orderTimeoutMinutes: "20",
   minimumWalletFunding: "1000",
   registrationEnabled: true,
@@ -30,6 +28,22 @@ const defaultSettings = {
   maintenanceMode: false,
   orderNotificationsEnabled: true,
 };
+
+const defaultLimits = {
+  orderTimeoutMinutes: { min: 5, max: 20 },
+  minimumWalletFunding: { min: 100 },
+};
+
+// Number inputs edit strings; the API stores numbers.
+function toFormSettings(settings = {}) {
+  const merged = { ...defaultSettings, ...settings };
+
+  return {
+    ...merged,
+    orderTimeoutMinutes: String(merged.orderTimeoutMinutes),
+    minimumWalletFunding: String(merged.minimumWalletFunding),
+  };
+}
 
 function Toggle({ checked, onChange, label, description, icon: Icon }) {
   return (
@@ -69,28 +83,38 @@ function Toggle({ checked, onChange, label, description, icon: Icon }) {
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState(defaultSettings);
   const [savedSettings, setSavedSettings] = useState(defaultSettings);
+  const [limits, setLimits] = useState(defaultLimits);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  function applyResponse(response) {
+    const nextSettings = toFormSettings(response?.settings);
+
+    setSettings(nextSettings);
+    setSavedSettings(nextSettings);
+    setLimits({ ...defaultLimits, ...(response?.limits || {}) });
+  }
+
+  function fetchSettings() {
+    return settingsService
+      .getAdminSettings()
+      .then(applyResponse)
+      .catch((error) => {
+        setLoadError(error?.message || "Unable to load platform settings");
+      })
+      .finally(() => setLoading(false));
+  }
+
+  function loadSettings() {
+    setLoading(true);
+    setLoadError("");
+    fetchSettings();
+  }
+
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        const nextSettings = {
-          ...defaultSettings,
-          ...parsed,
-        };
-
-        setSettings(nextSettings);
-        setSavedSettings(nextSettings);
-      }
-    } catch {
-      toast.error("Unable to load saved settings");
-    } finally {
-      setLoading(false);
-    }
+    fetchSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const hasChanges = useMemo(
@@ -121,6 +145,8 @@ export default function AdminSettingsPage() {
     const supportEmail = settings.supportEmail.trim().toLowerCase();
     const orderTimeout = Number(settings.orderTimeoutMinutes);
     const minimumFunding = Number(settings.minimumWalletFunding);
+    const timeoutLimits = limits.orderTimeoutMinutes;
+    const fundingMin = limits.minimumWalletFunding.min;
 
     if (!platformName) {
       toast.error("Platform name is required");
@@ -135,48 +161,59 @@ export default function AdminSettingsPage() {
       return;
     }
 
-    if (!Number.isFinite(orderTimeout) || orderTimeout < 1) {
-      toast.error("Order timeout must be at least 1 minute");
+    if (
+      !Number.isInteger(orderTimeout) ||
+      orderTimeout < timeoutLimits.min ||
+      orderTimeout > timeoutLimits.max
+    ) {
+      toast.error(
+        `Order timeout must be between ${timeoutLimits.min} and ${timeoutLimits.max} minutes`
+      );
       return;
     }
 
-    if (!Number.isFinite(minimumFunding) || minimumFunding < 0) {
-      toast.error("Minimum wallet funding cannot be negative");
+    if (!Number.isFinite(minimumFunding) || minimumFunding < fundingMin) {
+      toast.error(`Minimum wallet funding must be at least ${fundingMin}`);
+      return;
+    }
+
+    if (
+      settings.maintenanceMode &&
+      !savedSettings.maintenanceMode &&
+      !window.confirm(
+        "Turn on maintenance mode? Customers will not be able to sign in, order or fund their wallet until you turn it off. Admins keep access."
+      )
+    ) {
       return;
     }
 
     try {
       setSaving(true);
 
-      const nextSettings = {
-        ...settings,
+      const response = await settingsService.updateAdminSettings({
         platformName,
         supportEmail,
-        orderTimeoutMinutes: String(orderTimeout),
-        minimumWalletFunding: String(minimumFunding),
-      };
+        orderTimeoutMinutes: orderTimeout,
+        minimumWalletFunding: minimumFunding,
+        registrationEnabled: settings.registrationEnabled,
+        emailVerificationRequired: settings.emailVerificationRequired,
+        maintenanceMode: settings.maintenanceMode,
+        orderNotificationsEnabled: settings.orderNotificationsEnabled,
+      });
 
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(nextSettings)
-      );
-
-      setSettings(nextSettings);
-      setSavedSettings(nextSettings);
-
-      toast.success("Settings saved successfully");
-    } catch {
-      toast.error("Unable to save settings");
+      applyResponse(response);
+      toast.success(response?.message || "Settings saved successfully");
+    } catch (error) {
+      toast.error(error?.message || "Unable to save settings");
     } finally {
       setSaving(false);
     }
   }
 
+  // Fills the form with defaults; nothing changes until Save is pressed.
   function handleReset() {
-    localStorage.removeItem(STORAGE_KEY);
     setSettings(defaultSettings);
-    setSavedSettings(defaultSettings);
-    toast.success("Settings restored to defaults");
+    toast.success("Defaults filled in. Save to apply them.");
   }
 
   if (loading) {
@@ -187,6 +224,20 @@ export default function AdminSettingsPage() {
           <p className="mt-4 text-sm text-[var(--muted-foreground)]">
             Loading settings...
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex min-h-[420px] items-center justify-center">
+        <div className="text-center">
+          <p className="text-sm text-[var(--muted-foreground)]">{loadError}</p>
+          <Button type="button" onClick={loadSettings} className="mt-4">
+            <RefreshCcw size={17} />
+            Try again
+          </Button>
         </div>
       </div>
     );
@@ -221,7 +272,7 @@ export default function AdminSettingsPage() {
                 General settings
               </h2>
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                Basic platform identity and currency preferences.
+                Platform identity used in emails and on the support page.
               </p>
             </div>
           </div>
@@ -265,31 +316,13 @@ export default function AdminSettingsPage() {
 
             <label className="space-y-2">
               <span className="block text-sm font-semibold text-[var(--foreground)]">
-                Default currency
-              </span>
-
-              <select
-                name="defaultCurrency"
-                value={settings.defaultCurrency}
-                onChange={updateField}
-                className="h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 text-sm text-[var(--foreground)] outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10"
-              >
-                <option value="NGN">Nigerian Naira (NGN)</option>
-                <option value="USD">US Dollar (USD)</option>
-                <option value="GBP">British Pound (GBP)</option>
-                <option value="EUR">Euro (EUR)</option>
-              </select>
-            </label>
-
-            <label className="space-y-2">
-              <span className="block text-sm font-semibold text-[var(--foreground)]">
-                Minimum wallet funding
+                Minimum wallet funding (NGN)
               </span>
 
               <input
                 name="minimumWalletFunding"
                 type="number"
-                min="0"
+                min={limits.minimumWalletFunding.min}
                 step="1"
                 value={settings.minimumWalletFunding}
                 onChange={updateField}
@@ -322,7 +355,7 @@ export default function AdminSettingsPage() {
                 updateToggle("registrationEnabled", value)
               }
               label="Allow user registration"
-              description="Permit new users to create ChapsSmS accounts."
+              description="Permit new users to create ChapsSmS accounts, including with Google."
               icon={UserPlus}
             />
 
@@ -332,7 +365,7 @@ export default function AdminSettingsPage() {
                 updateToggle("emailVerificationRequired", value)
               }
               label="Require email verification"
-              description="Users must verify their email before they can sign in."
+              description="Users must verify their email before they can sign in. When off, new accounts can sign in right away."
               icon={ShieldCheck}
             />
 
@@ -342,7 +375,7 @@ export default function AdminSettingsPage() {
                 updateToggle("orderNotificationsEnabled", value)
               }
               label="Order notifications"
-              description="Enable platform notifications for order status changes."
+              description="Show customers alerts when an OTP arrives or an order expires."
               icon={Bell}
             />
 
@@ -352,7 +385,7 @@ export default function AdminSettingsPage() {
                 updateToggle("maintenanceMode", value)
               }
               label="Maintenance mode"
-              description="Temporarily restrict customer access while maintenance is active."
+              description="Block customer sign-in, orders and funding. Admins keep access."
               icon={Wrench}
             />
           </div>
@@ -369,20 +402,23 @@ export default function AdminSettingsPage() {
                 Order settings
               </h2>
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                Configure how long pending OTP orders remain active.
+                How long a number waits for an OTP before it is cancelled
+                and refunded. Applies to new orders.
               </p>
             </div>
           </div>
 
           <label className="block max-w-md space-y-2">
             <span className="block text-sm font-semibold text-[var(--foreground)]">
-              Order timeout in minutes
+              Order timeout in minutes ({limits.orderTimeoutMinutes.min}–
+              {limits.orderTimeoutMinutes.max})
             </span>
 
             <input
               name="orderTimeoutMinutes"
               type="number"
-              min="1"
+              min={limits.orderTimeoutMinutes.min}
+              max={limits.orderTimeoutMinutes.max}
               step="1"
               value={settings.orderTimeoutMinutes}
               onChange={updateField}

@@ -1,4 +1,5 @@
 const axios = require("axios");
+const platformSettings = require("./platformSettingsService");
 
 const BREVO_API_KEY =
   String(
@@ -274,6 +275,35 @@ async function sendEmail({
   }
 }
 
+/* Platform name and support contact come from the admin settings. */
+async function getBrand() {
+  const settings =
+    await platformSettings.getSettings();
+
+  const brandName =
+    settings.platformName;
+
+  const supportEmail =
+    settings.supportEmail;
+
+  return {
+    brandName,
+    safeBrand:
+      escapeHtml(brandName),
+    supportText: supportEmail
+      ? `\n\nNeed help? Contact ${supportEmail}.`
+      : "",
+    supportHtml: supportEmail
+      ? `
+
+            <p style="margin:12px 0 0;font-size:13px;line-height:1.6;color:#94a3b8;">
+              Need help? Contact
+              <a href="mailto:${escapeHtml(supportEmail)}" style="color:#2563eb;">${escapeHtml(supportEmail)}</a>.
+            </p>`
+      : "",
+  };
+}
+
 async function sendVerificationEmail({
   to,
   username,
@@ -312,6 +342,9 @@ async function sendVerificationEmail({
       greetingName,
     );
 
+  const { brandName, safeBrand, supportText, supportHtml } =
+    await getBrand();
+
   const safeCode =
     escapeHtml(
       verificationCode,
@@ -321,25 +354,25 @@ async function sendVerificationEmail({
     to,
 
     subject:
-      "Verify your ChapsSmS account",
+      `Verify your ${brandName} account`,
 
     text: `
 Hello ${greetingName},
 
-Your ChapsSmS verification code is:
+Your ${brandName} verification code is:
 
 ${verificationCode}
 
 This code expires in 10 minutes.
 
-If you did not create this account, you can ignore this email.
+If you did not create this account, you can ignore this email.${supportText}
     `.trim(),
 
     html: `
       <div style="margin:0;background:#f8fafc;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
         <div style="max-width:560px;margin:0 auto;overflow:hidden;border:1px solid #e2e8f0;border-radius:20px;background:#ffffff;">
           <div style="background:#2563eb;padding:28px 28px 24px;color:#ffffff;">
-            <div style="font-size:22px;font-weight:800;">ChapsSmS</div>
+            <div style="font-size:22px;font-weight:800;">${safeBrand}</div>
             <div style="margin-top:6px;font-size:14px;color:#dbeafe;">
               Email verification
             </div>
@@ -355,7 +388,7 @@ If you did not create this account, you can ignore this email.
             </p>
 
             <p style="margin:12px 0 0;line-height:1.7;color:#475569;">
-              Enter this code on ChapsSmS to finish creating your account.
+              Enter this code on ${safeBrand} to finish creating your account.
             </p>
 
             <div style="margin:26px 0;padding:22px;border-radius:14px;background:#eff6ff;text-align:center;color:#1d4ed8;font-size:34px;font-weight:800;letter-spacing:9px;">
@@ -368,7 +401,7 @@ If you did not create this account, you can ignore this email.
 
             <p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:#94a3b8;">
               If you did not create this account, you can ignore this email.
-            </p>
+            </p>${supportHtml}
           </div>
         </div>
       </div>
@@ -414,6 +447,9 @@ async function sendPasswordResetEmail({
       greetingName,
     );
 
+  const { brandName, safeBrand, supportText, supportHtml } =
+    await getBrand();
+
   const safeCode =
     escapeHtml(
       resetCode,
@@ -423,25 +459,25 @@ async function sendPasswordResetEmail({
     to,
 
     subject:
-      "Reset your ChapsSmS password",
+      `Reset your ${brandName} password`,
 
     text: `
 Hello ${greetingName},
 
-Your ChapsSmS password-reset code is:
+Your ${brandName} password-reset code is:
 
 ${resetCode}
 
 This code expires in 10 minutes.
 
-If you did not request a password reset, you can ignore this email.
+If you did not request a password reset, you can ignore this email.${supportText}
     `.trim(),
 
     html: `
       <div style="margin:0;background:#f8fafc;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
         <div style="max-width:560px;margin:0 auto;overflow:hidden;border:1px solid #e2e8f0;border-radius:20px;background:#ffffff;">
           <div style="background:#2563eb;padding:28px 28px 24px;color:#ffffff;">
-            <div style="font-size:22px;font-weight:800;">ChapsSmS</div>
+            <div style="font-size:22px;font-weight:800;">${safeBrand}</div>
             <div style="margin-top:6px;font-size:14px;color:#dbeafe;">
               Password reset
             </div>
@@ -457,7 +493,7 @@ If you did not request a password reset, you can ignore this email.
             </p>
 
             <p style="margin:12px 0 0;line-height:1.7;color:#475569;">
-              Enter this code on ChapsSmS to continue resetting your password.
+              Enter this code on ${safeBrand} to continue resetting your password.
             </p>
 
             <div style="margin:26px 0;padding:22px;border-radius:14px;background:#eff6ff;text-align:center;color:#1d4ed8;font-size:34px;font-weight:800;letter-spacing:9px;">
@@ -470,7 +506,7 @@ If you did not request a password reset, you can ignore this email.
 
             <p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:#94a3b8;">
               If you did not request this password reset, you can ignore this email.
-            </p>
+            </p>${supportHtml}
           </div>
         </div>
       </div>

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronDown, CircleHelp, MessageCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, CircleHelp, Mail, MessageCircle } from "lucide-react";
+
+import { settingsService } from "@/services/settingsService";
 
 const faqs = [
   {
@@ -37,6 +39,14 @@ export default function SupportPage() {
   const whatsappMessage = encodeURIComponent(
     "Hello ChapsSmS support, I need help with my account.",
   );
+  const [supportEmail, setSupportEmail] = useState("");
+
+  useEffect(() => {
+    settingsService
+      .getPublicSettings()
+      .then((settings) => setSupportEmail(settings?.supportEmail || ""))
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="mx-auto w-full max-w-[1050px]">
@@ -70,6 +80,15 @@ export default function SupportPage() {
               <MessageCircle size={18} />
               Chat on WhatsApp
             </a>
+            {supportEmail ? (
+              <a
+                href={`mailto:${supportEmail}`}
+                className="mt-3 flex items-center gap-2 text-sm font-bold text-blue-600 hover:underline sm:ml-3 sm:mt-6 sm:inline-flex"
+              >
+                <Mail size={16} />
+                {supportEmail}
+              </a>
+            ) : null}
           </div>
         </div>
       </section>

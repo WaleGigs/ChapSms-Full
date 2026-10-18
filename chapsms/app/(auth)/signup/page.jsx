@@ -13,6 +13,7 @@ import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import PasswordField from "@/components/auth/PasswordField";
 import GoogleAuthButton from "@/components/auth/GoogleAuthButton";
+import { settingsService } from "@/services/settingsService";
 
 function normalizeEmail(value) {
   return String(value || "")
@@ -48,6 +49,15 @@ export default function SignupPage() {
   const router = useRouter();
   useEffect(() => { captureAcquisition(); }, []);
   const { signup, googleLogin } = useAuth();
+
+  // The backend enforces this too; the notice just saves a wasted form fill.
+  const [registrationClosed, setRegistrationClosed] = useState(false);
+  useEffect(() => {
+    settingsService
+      .getPublicSettings()
+      .then((settings) => setRegistrationClosed(settings?.registrationEnabled === false))
+      .catch(() => {});
+  }, []);
 
   const [form, setForm] = useState({
     username: "",
@@ -187,6 +197,15 @@ export default function SignupPage() {
           "Account created. Check your email for the verification code."
       );
 
+      if (response?.verificationRequired === false) {
+        router.push(
+          `/login?email=${encodeURIComponent(
+            email
+          )}`
+        );
+        return;
+      }
+
       router.push(
         `/verify-email?email=${encodeURIComponent(
           email
@@ -269,6 +288,7 @@ export default function SignupPage() {
     !passwordsDoNotMatch &&
     Boolean(form.confirmPassword) &&
     form.terms &&
+    !registrationClosed &&
     !loading &&
     !googleLoading;
 
@@ -289,6 +309,16 @@ export default function SignupPage() {
           create a password.
         </p>
       </div>
+
+      {registrationClosed ? (
+        <div
+          role="status"
+          className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+        >
+          New account registration is currently closed. Existing users can
+          still <Link href="/login" className="underline">sign in</Link>.
+        </div>
+      ) : null}
 
       {submitError ? (
         <div

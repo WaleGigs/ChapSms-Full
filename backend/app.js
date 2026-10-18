@@ -12,6 +12,8 @@ const authRoutes = require("./routes/authRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const paymentRoutes = require("./routes/payment");
 const catalogRoutes = require("./routes/catalogRoutes");
+const settingsRoutes = require("./routes/settingsRoutes");
+const { maintenanceGuard } = require("./middleware/maintenanceMiddleware");
 
 const app = express();
 
@@ -71,6 +73,10 @@ app.get("/api/cors-test", (req, res) => {
   });
 });
 
+app.use(maintenanceGuard);
+
+app.use("/api/settings", settingsRoutes.publicRouter);
+app.use("/api/admin/settings", settingsRoutes.adminRouter);
 app.use("/api/admin/pricing", adminPricingRoutes);
 app.use("/api/admin/metrics", adminMetricsRoutes);
 app.use("/api/admin/daily-changes", adminDailyChangesRoutes);
