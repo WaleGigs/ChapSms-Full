@@ -2,6 +2,9 @@ const crypto = require("node:crypto");
 
 const Order = require("../models/Order");
 const Wallet = require("../models/Wallet");
+const {
+  trackPurchaseAttempt,
+} = require("../utils/purchaseAttempts");
 const providerManager = require(
   "../services/providers/providerManager"
 );
@@ -1357,6 +1360,22 @@ exports.createOrder =
           });
       }
 
+      /*
+       * Any failure from here on is recorded for the admin User Activity page.
+       */
+      const attempt =
+        trackPurchaseAttempt(
+          req,
+          res,
+          {
+            kind: "number",
+            server: normalizedServer,
+            country: displayCountryName,
+            service: normalizedService,
+            label: displayServiceName,
+          },
+        );
+
       const pricingStrategy =
         await pricingService
           .resolvePricingStrategy({
@@ -1665,6 +1684,9 @@ exports.createOrder =
           preliminaryPricing
             .sellingPrice,
         );
+
+      attempt.amount =
+        reservedAmount;
 
       if (
         !Number.isFinite(
@@ -2340,6 +2362,9 @@ exports.createOrder =
       }
 
       debitedAmount =
+        finalAmount;
+
+      attempt.amount =
         finalAmount;
 
       const providerStartedAt =

@@ -4,6 +4,10 @@ const SocialProduct = require(
   "../models/SocialProduct"
 );
 
+const {
+  trackPurchaseAttempt,
+} = require("../utils/purchaseAttempts");
+
 const SocialOrder = require(
   "../models/SocialOrder"
 );
@@ -2373,6 +2377,7 @@ async function buyHouseStockProduct({
   res,
   product,
   quantity,
+  attempt,
 }) {
   let reservationReference =
     "";
@@ -2382,6 +2387,9 @@ async function buyHouseStockProduct({
     false;
   let wallet = null;
   let order = null;
+
+  attempt.orderId =
+    () => order?._id;
 
   const claimedIds = [];
   let inventoryCommitted =
@@ -2425,6 +2433,9 @@ async function buyHouseStockProduct({
     reservedAmount =
       unitSellingPrice *
       quantity;
+
+    attempt.amount =
+      reservedAmount;
 
     if (
       !Number.isFinite(
@@ -3420,6 +3431,21 @@ exports.buySocialProduct =
           });
       }
 
+      /*
+       * Any failure from here on is recorded for the admin User Activity page.
+       */
+      const attempt =
+        trackPurchaseAttempt(
+          req,
+          res,
+          {
+            kind: "social",
+            provider: product.provider,
+            label: product.name,
+            orderId: () => order?._id,
+          }
+        );
+
       if (
         product.sourceType ===
           "house" ||
@@ -3431,6 +3457,7 @@ exports.buySocialProduct =
           res,
           product,
           quantity,
+          attempt,
         });
       }
 
@@ -3476,6 +3503,9 @@ exports.buySocialProduct =
       reservedAmount =
         unitSellingPrice *
         quantity;
+
+      attempt.amount =
+        reservedAmount;
 
       if (
         !Number.isFinite(
