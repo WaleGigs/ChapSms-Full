@@ -20,6 +20,10 @@ const SocialPricingRule = require(
   "../models/SocialPricingRule"
 );
 
+const User = require(
+  "../models/User"
+);
+
 const socialPricingService = require(
   "../services/socialPricingService"
 );
@@ -2220,11 +2224,26 @@ exports.getAdminSocialOrders = async (req, res) => {
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const regex = new RegExp(escaped, "i");
+      const matchingUsers = await User.find({
+        $or: [
+          { email: regex },
+          { username: regex },
+          { firstName: regex },
+          { lastName: regex },
+        ],
+      })
+        .select("_id")
+        .limit(500)
+        .lean();
+
       filter.$or = [
         { productName: regex },
         { category: regex },
         { providerOrderId: regex },
       ];
+      if (matchingUsers.length) {
+        filter.$or.push({ user: { $in: matchingUsers.map((user) => user._id) } });
+      }
     }
 
     const [orders, total] = await Promise.all([

@@ -96,7 +96,7 @@ export default function SocialOrdersPanel() {
                     setAppliedSearch(search.trim());
                   }
                 }}
-                placeholder="Search product/order..."
+                placeholder="Search email, product or order..."
                 className="h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--background)] pl-10 pr-3 text-sm outline-none focus:border-blue-500"
               />
             </div>
