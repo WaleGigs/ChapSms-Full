@@ -211,6 +211,11 @@ walletSchema.index({
     1,
 });
 
+walletSchema.index({
+  "transactions.createdAt":
+    -1,
+});
+
 walletSchema.virtual(
   "formattedBalance"
 ).get(

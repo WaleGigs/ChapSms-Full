@@ -152,45 +152,9 @@ function sanitizeOrders(orders) {
 
 
 
-async function getUserFinancialSummaries(userIds = []) {
+function depositedTotalExpression(transactionsPath) {
 
-  if (!userIds.length) {
-
-    return new Map();
-
-  }
-
-
-
-  const rows = await Wallet.aggregate([
-
-    {
-
-      $match: {
-
-        user: {
-
-          $in: userIds,
-
-        },
-
-      },
-
-    },
-
-    {
-
-      $project: {
-
-        user: 1,
-
-        balance: {
-
-          $ifNull: ["$balance", 0],
-
-        },
-
-        totalDeposited: {
+  return {
 
           $sum: {
 
@@ -202,7 +166,7 @@ async function getUserFinancialSummaries(userIds = []) {
 
                   input: {
 
-                    $ifNull: ["$transactions", []],
+                    $ifNull: [transactionsPath, []],
 
                   },
 
@@ -416,7 +380,51 @@ async function getUserFinancialSummaries(userIds = []) {
 
           },
 
+        };
+
+}
+
+
+
+async function getUserFinancialSummaries(userIds = []) {
+
+  if (!userIds.length) {
+
+    return new Map();
+
+  }
+
+
+
+  const rows = await Wallet.aggregate([
+
+    {
+
+      $match: {
+
+        user: {
+
+          $in: userIds,
+
         },
+
+      },
+
+    },
+
+    {
+
+      $project: {
+
+        user: 1,
+
+        balance: {
+
+          $ifNull: ["$balance", 0],
+
+        },
+
+        totalDeposited: depositedTotalExpression("$transactions"),
 
       },
 
@@ -608,6 +616,15 @@ router.get("/dashboard", async (req, res) => {
 
 
 
+const USER_SORTS = {
+  newest: { createdAt: -1, _id: -1 },
+  oldest: { createdAt: 1, _id: 1 },
+  balance: null,
+  deposit: null,
+  email: { email: 1, _id: 1 },
+  name: { firstName: 1, lastName: 1, username: 1, _id: 1 },
+};
+
 router.get("/users", async (req, res) => {
   try {
     const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
@@ -620,15 +637,60 @@ router.get("/users", async (req, res) => {
       })),
     } : {};
 
-    const [total, users] = await Promise.all([
-      User.countDocuments(query),
-      User.find(query)
-        .select("username firstName lastName email role suspended isVerified authProvider registrationSource registrationMedium registrationCampaign lastLogin createdAt updatedAt")
-        .sort({ createdAt: -1, _id: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-    ]);
+    const sortKey = Object.hasOwn(USER_SORTS, req.query.sort) ? req.query.sort : "newest";
+    const userFields = "username firstName lastName email role suspended isVerified authProvider registrationSource registrationMedium registrationCampaign lastLogin createdAt updatedAt";
+    let total;
+    let users;
+
+    if (sortKey === "balance" || sortKey === "deposit") {
+      // Wallet figures live on another collection, so rank in the database
+      // first and then load the page of users in that order.
+      const sortField = sortKey === "balance" ? "balance" : "totalDeposited";
+      const [count, ranked] = await Promise.all([
+        User.countDocuments(query),
+        User.aggregate([
+          { $match: query },
+          {
+            $lookup: {
+              from: Wallet.collection.name,
+              let: { userId: "$_id" },
+              pipeline: [
+                { $match: { $expr: { $eq: ["$user", "$$userId"] } } },
+                {
+                  $project: {
+                    balance: { $ifNull: ["$balance", 0] },
+                    totalDeposited: depositedTotalExpression("$transactions"),
+                  },
+                },
+              ],
+              as: "walletStats",
+            },
+          },
+          { $addFields: { sortValue: { $ifNull: [{ $arrayElemAt: [`$walletStats.${sortField}`, 0] }, 0] } } },
+          { $sort: { sortValue: -1, createdAt: -1, _id: -1 } },
+          { $skip: (page - 1) * limit },
+          { $limit: limit },
+          { $project: { _id: 1 } },
+        ]),
+      ]);
+      const pageUsers = await User.find({ _id: { $in: ranked.map((row) => row._id) } })
+        .select(userFields)
+        .lean();
+      const byId = new Map(pageUsers.map((user) => [String(user._id), user]));
+      total = count;
+      users = ranked.map((row) => byId.get(String(row._id))).filter(Boolean);
+    } else {
+      [total, users] = await Promise.all([
+        User.countDocuments(query),
+        User.find(query)
+          .select(userFields)
+          .sort(USER_SORTS[sortKey])
+          .collation({ locale: "en", strength: 2 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean(),
+      ]);
+    }
     const financialSummaries = await getUserFinancialSummaries(users.map((user) => user._id));
     const usersWithWalletStats = users.map((user) => {
       const summary = financialSummaries.get(String(user._id)) || {

@@ -171,6 +171,10 @@ const socialOrderSchema =
   );
 
 socialOrderSchema.index({
+  createdAt: -1,
+});
+
+socialOrderSchema.index({
   user: 1,
   createdAt: -1,
 });

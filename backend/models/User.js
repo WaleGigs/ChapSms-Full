@@ -40,6 +40,8 @@ const userSchema = new mongoose.Schema(
   { timestamps: true, versionKey: false }
 );
 
+userSchema.index({ createdAt: -1 });
+
 userSchema.index(
   { username: 1 },
   { unique: true, sparse: true, collation: { locale: "en", strength: 2 } }
