@@ -282,6 +282,7 @@ function normalizeWalletTransaction(transaction, index) {
 
   let method = String(transaction?.description || "").trim() || "Wallet";
   if (gateway === "neurapay") method = paymentMethod === "bank_transfer" ? "NeuraPay Bank Transfer" : "NeuraPay";
+  if (gateway === "pocketfi") method = paymentMethod === "bank_transfer" ? "PocketFi Bank Transfer" : "PocketFi";
   if (gateway === "flutterwave") method = paymentMethod === "card" ? "Flutterwave Card" : "Flutterwave";
 
   return {

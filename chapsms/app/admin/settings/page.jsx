@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Bell,
   Clock3,
+  Landmark,
   Mail,
   RefreshCcw,
   Save,
@@ -448,6 +449,87 @@ export default function AdminSettingsPage() {
           </Button>
         </div>
       </form>
+
+      <PaymentGatewayCard />
     </div>
+  );
+}
+
+/*
+ * Which gateway Add Funds offers. Saved on click, separate from the form above.
+ * Accounts customers already got from the other gateway keep crediting.
+ */
+function PaymentGatewayCard() {
+  const [gateways, setGateways] = useState([]);
+  const [active, setActive] = useState("");
+  const [switching, setSwitching] = useState("");
+
+  useEffect(() => {
+    settingsService
+      .getPaymentGateways()
+      .then((response) => {
+        setGateways(response?.gateways || []);
+        setActive(response?.active || "");
+      })
+      .catch((error) => {
+        toast.error(error?.message || "Unable to load payment gateways");
+      });
+  }, []);
+
+  async function handleSwitch(id) {
+    if (id === active || switching) return;
+
+    try {
+      setSwitching(id);
+      const response = await settingsService.setPaymentGateway(id);
+      setActive(response?.active || id);
+      toast.success(response?.message || "Payment gateway switched");
+    } catch (error) {
+      toast.error(error?.message || "Unable to switch the payment gateway");
+    } finally {
+      setSwitching("");
+    }
+  }
+
+  return (
+    <Card className="mt-6 rounded-3xl p-5 sm:p-6">
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+          <Landmark size={18} />
+        </span>
+
+        <div className="min-w-0">
+          <h2 className="text-xl font-black text-[var(--foreground)]">
+            Payment gateway
+          </h2>
+
+          <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">
+            The gateway customers fund their wallet with on Add Funds. Accounts
+            already issued by the other gateway keep crediting after a switch.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-3">
+        {gateways.map((gateway) => (
+          <Button
+            key={gateway.id}
+            type="button"
+            variant={gateway.id === active ? undefined : "secondary"}
+            disabled={Boolean(switching)}
+            onClick={() => handleSwitch(gateway.id)}
+            className="w-full sm:w-auto"
+          >
+            {switching === gateway.id ? "Switching..." : gateway.label}
+          </Button>
+        ))}
+      </div>
+
+      {gateways.length === 1 && (
+        <p className="mt-3 text-xs text-[var(--muted-foreground)]">
+          Only one gateway has keys configured on the server, so there is nothing to switch to yet.
+        </p>
+      )}
+    </Card>
   );
 }

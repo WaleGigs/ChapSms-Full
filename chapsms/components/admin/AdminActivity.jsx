@@ -111,7 +111,7 @@ function ActivityRow({ row, onUser }) {
   const what = row.label || (row.kind === "social" ? "a social product" : "a number");
   const kindWord = row.kind === "social" ? "Social" : row.kind === "number" ? "Number" : null;
   const email = row.user?.email || "";
-  const gateway = row.provider === "neurapay" ? "NeuraPay" : row.provider === "flutterwave" ? "Flutterwave" : null;
+  const gateway = row.provider === "neurapay" ? "NeuraPay" : row.provider === "pocketfi" ? "PocketFi" : row.provider === "flutterwave" ? "Flutterwave" : null;
 
   let title;
   let amountText = row.amount != null ? money(row.amount) : "";

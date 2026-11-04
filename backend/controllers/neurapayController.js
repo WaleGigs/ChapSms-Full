@@ -20,6 +20,10 @@ const {
   reportDepositPurchase,
 } = require("../services/tiktokEventsService");
 
+const {
+  getActiveGateway,
+} = require("../services/paymentGatewayService");
+
 function requireEnvironment(
   name
 ) {
@@ -952,6 +956,23 @@ exports.createVirtualAccount =
           });
       }
 
+      const activeGateway =
+        await getActiveGateway();
+
+      if (
+        activeGateway.id !== "neurapay"
+      ) {
+        return res
+          .status(409)
+          .json({
+            success: false,
+            message:
+              "This payment method is no longer available. Please reload the page.",
+            code:
+              "PAYMENT_GATEWAY_NOT_ACTIVE",
+          });
+      }
+
       const customerEmail =
         normalizeEmail(
           req.user.email
@@ -1376,3 +1397,6 @@ exports.handleWebhook =
 
 exports.verifyAndCredit =
   verifyAndCredit;
+
+exports.ensureWallet =
+  ensureWallet;

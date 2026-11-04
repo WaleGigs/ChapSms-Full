@@ -3,6 +3,7 @@ const express = require("express");
 const { protect } = require("../middleware/authMiddleware");
 const adminOnly = require("../middleware/adminMiddleware");
 const platformSettings = require("../services/platformSettingsService");
+const paymentGateways = require("../services/paymentGatewayService");
 
 /*
  * Public: GET /api/settings/public
@@ -72,6 +73,50 @@ adminRouter.put("/", async (req, res) => {
       success: false,
       code: error.code || "SETTINGS_UPDATE_FAILED",
       message: "Unable to save platform settings",
+    });
+  }
+});
+
+/*
+ * Admin: GET/PUT /api/admin/settings/payment-gateway
+ */
+adminRouter.get("/payment-gateway", async (_req, res) => {
+  const active = await paymentGateways.getActiveGateway();
+
+  return res.json({
+    success: true,
+    active: active.id,
+    gateways: paymentGateways.listGateways(),
+  });
+});
+
+adminRouter.put("/payment-gateway", async (req, res) => {
+  try {
+    const active = await paymentGateways.setActiveGateway(req.body?.gateway, {
+      adminId: req.user?._id || null,
+    });
+
+    return res.json({
+      success: true,
+      message: `New funding accounts now use ${active.label}`,
+      active: active.id,
+      gateways: paymentGateways.listGateways(),
+    });
+  } catch (error) {
+    if (error.status && error.status < 500) {
+      return res.status(error.status).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+    }
+
+    console.error("Payment gateway update error:", error);
+
+    return res.status(error.status || 500).json({
+      success: false,
+      code: error.code || "PAYMENT_GATEWAY_UPDATE_FAILED",
+      message: "Unable to switch the payment gateway",
     });
   }
 });

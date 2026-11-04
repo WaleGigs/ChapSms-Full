@@ -14,7 +14,9 @@ import {
 
 import Button from "@/components/ui/Button";
 import { useWallet } from "@/hooks/useWallet";
+import { api } from "@/lib/api";
 import { neurapayService } from "@/services/neurapayService";
+import { pocketfiService } from "@/services/pocketfiService";
 import { settingsService } from "@/services/settingsService";
 import { trackInitiateCheckout, trackWalletFundingPurchase } from "@/lib/tiktokEvents";
 import { trackSnapPurchase } from "@/lib/acquisition";
@@ -87,6 +89,8 @@ function AccountValue({ label, value, copyable = false, onCopy }) {
   );
 }
 
+const FALLBACK_GATEWAY = { id: "neurapay", label: "NeuraPay" };
+
 export default function WalletPage() {
   const { wallet, refreshWallet } = useWallet();
 
@@ -95,7 +99,8 @@ export default function WalletPage() {
   const [accountLoading, setAccountLoading] = useState(false);
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [checkingBalance, setCheckingBalance] = useState(false);
-  const [neurapayLoaded, setNeurapayLoaded] = useState(false);
+  const [gateway, setGateway] = useState(null);
+  const [accountLoaded, setAccountLoaded] = useState(false);
 
   const checkoutTrackedRef = useRef(new Set());
   // Baseline existing deposits; only report deposits first seen AFTER the initial wallet load.
@@ -108,7 +113,7 @@ export default function WalletPage() {
       tx?.type === "deposit" &&
       tx?.status === "completed" &&
       tx?.environment === "live" &&
-      ["neurapay", "flutterwave"].includes(tx?.paymentGateway) &&
+      ["neurapay", "pocketfi", "flutterwave"].includes(tx?.paymentGateway) &&
       String(tx?.currency || "NGN").toUpperCase() === "NGN" &&
       tx?.reference && Number(tx?.amount) > 0
     );
@@ -145,26 +150,36 @@ export default function WalletPage() {
     trackInitiateCheckout(details);
   }
 
-  const loadNeuraPayAccount = useCallback(async () => {
+  // An admin can switch gateways, so ask which one is live before showing an account.
+  useEffect(() => {
+    api("/payment/gateway")
+      .then((response) => setGateway(response?.gateway || FALLBACK_GATEWAY))
+      .catch(() => setGateway(FALLBACK_GATEWAY));
+  }, []);
+
+  const fundingService = gateway?.id === "pocketfi" ? pocketfiService : neurapayService;
+  const gatewayLabel = gateway?.label || "";
+
+  const loadFundingAccount = useCallback(async () => {
     try {
       setAccountLoading(true);
-      const existing = await neurapayService.getAccount({
+      const existing = await fundingService.getAccount({
         providerChannel: "Paga",
       });
       setAccount(existing);
       return existing;
     } catch (error) {
-      console.error("NeuraPay account loading failed:", error);
+      console.error("Funding account loading failed:", error);
       return null;
     } finally {
       setAccountLoading(false);
-      setNeurapayLoaded(true);
+      setAccountLoaded(true);
     }
-  }, []);
+  }, [fundingService]);
 
   useEffect(() => {
-    if (!neurapayLoaded) loadNeuraPayAccount();
-  }, [neurapayLoaded, loadNeuraPayAccount]);
+    if (gateway && !accountLoaded) loadFundingAccount();
+  }, [gateway, accountLoaded, loadFundingAccount]);
 
   useEffect(() => {
     if (!account) return undefined;
@@ -181,14 +196,14 @@ export default function WalletPage() {
   useEffect(() => {
     if (!account || numericAmount < minimumFunding) return;
 
-    trackCheckoutOnce(`neurapay:${numericAmount}`, {
+    trackCheckoutOnce(`${gateway?.id}:${numericAmount}`, {
       value: numericAmount,
       currency: "NGN",
-      description: "ChapsSms NeuraPay bank-transfer funding started",
+      description: `ChapsSms ${gatewayLabel} bank-transfer funding started`,
     });
-  }, [account, numericAmount, minimumFunding]);
+  }, [account, numericAmount, minimumFunding, gateway?.id, gatewayLabel]);
 
-  async function handleCreateNeuraPayAccount() {
+  async function handleCreateFundingAccount() {
     if (creatingAccount) return;
 
     if (!Number.isFinite(numericAmount) || numericAmount < minimumFunding) {
@@ -198,27 +213,27 @@ export default function WalletPage() {
 
     try {
       setCreatingAccount(true);
-      const response = await neurapayService.createAccount({
+      const response = await fundingService.createAccount({
         providerChannel: "Paga",
       });
 
       const nextAccount = response?.account || null;
       if (!nextAccount) {
-        throw new Error("ChapsSms did not receive the NeuraPay account details");
+        throw new Error(`ChapsSms did not receive the ${gatewayLabel} account details`);
       }
 
       setAccount(nextAccount);
 
-      trackCheckoutOnce(`neurapay:${numericAmount}`, {
+      trackCheckoutOnce(`${gateway?.id}:${numericAmount}`, {
         value: numericAmount,
         currency: "NGN",
-        description: "ChapsSms NeuraPay bank-transfer funding started",
+        description: `ChapsSms ${gatewayLabel} bank-transfer funding started`,
       });
 
-      toast.success(response?.message || "NeuraPay funding account ready");
+      toast.success(response?.message || `${gatewayLabel} funding account ready`);
     } catch (error) {
-      console.error("NeuraPay account creation failed:", error);
-      toast.error(error?.message || "Unable to create your NeuraPay funding account");
+      console.error("Funding account creation failed:", error);
+      toast.error(error?.message || "Unable to create your funding account");
     } finally {
       setCreatingAccount(false);
     }
@@ -233,7 +248,7 @@ export default function WalletPage() {
     }
   }
 
-  async function handleCheckNeuraPayPayment() {
+  async function handleCheckPayment() {
     if (checkingBalance) return;
 
     try {
@@ -255,7 +270,7 @@ export default function WalletPage() {
           Add <span className="text-blue-600">Funds</span>
         </h1>
         <p className="mt-2 text-sm text-[var(--muted-foreground)] sm:text-base">
-          Fund your ChapsSms wallet securely through NeuraPay bank transfer.
+          Fund your ChapsSms wallet securely through bank transfer.
         </p>
       </div>
 
@@ -317,7 +332,7 @@ export default function WalletPage() {
               <Landmark size={19} />
             </div>
             <div>
-              <p className="font-black text-[var(--foreground)]">NeuraPay bank transfer</p>
+              <p className="font-black text-[var(--foreground)]">{gatewayLabel ? `${gatewayLabel} bank transfer` : "Bank transfer"}</p>
               <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">
                 Transfer <strong className="text-[var(--foreground)]">{formatNaira(numericAmount)}</strong> to the reserved account below. Your verified transfer amount is what gets credited.
               </p>
@@ -325,12 +340,12 @@ export default function WalletPage() {
           </div>
         </div>
 
-        {accountLoading ? (
+        {accountLoading || !accountLoaded ? (
           <div className="mt-6 flex min-h-44 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
             <div className="text-center">
               <LoaderCircle size={28} className="mx-auto animate-spin text-blue-600" />
               <p className="mt-3 text-sm font-semibold text-[var(--muted-foreground)]">
-                Loading your NeuraPay account...
+                Loading your funding account...
               </p>
             </div>
           </div>
@@ -340,7 +355,7 @@ export default function WalletPage() {
               <div>
                 <p className="text-sm font-black text-[var(--foreground)]">Your funding account</p>
                 <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                  Powered by NeuraPay • {account.bankName || "Paga"}
+                  Powered by {gatewayLabel} • {account.bankName}
                 </p>
               </div>
               <span className="w-fit rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-600 dark:text-emerald-300">
@@ -370,7 +385,7 @@ export default function WalletPage() {
               <Button
                 type="button"
                 className="h-14 w-full"
-                onClick={handleCheckNeuraPayPayment}
+                onClick={handleCheckPayment}
                 disabled={checkingBalance}
               >
                 {checkingBalance ? (
@@ -387,13 +402,13 @@ export default function WalletPage() {
             <Building2 size={30} className="mx-auto text-blue-600" />
             <p className="mt-3 font-black text-[var(--foreground)]">Create your personal funding account</p>
             <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[var(--muted-foreground)]">
-              ChapsSms uses NeuraPay&apos;s Paga channel for wallet funding.
+              ChapsSms uses {gatewayLabel} for wallet funding.
             </p>
 
             <Button
               type="button"
               className="mt-5 h-14 w-full"
-              onClick={handleCreateNeuraPayAccount}
+              onClick={handleCreateFundingAccount}
               disabled={creatingAccount}
             >
               {creatingAccount ? (
@@ -401,7 +416,7 @@ export default function WalletPage() {
               ) : (
                 <Landmark size={19} />
               )}
-              {creatingAccount ? "Creating secure account..." : "Generate NeuraPay account"}
+              {creatingAccount ? "Creating secure account..." : `Generate ${gatewayLabel} account`}
             </Button>
           </div>
         )}
@@ -417,12 +432,12 @@ export default function WalletPage() {
           {
             icon: Zap,
             title: "Automatic credit",
-            text: "Verified NeuraPay transfers update your ChapsSms wallet automatically.",
+            text: "Verified transfers update your ChapsSms wallet automatically.",
           },
           {
             icon: Landmark,
             title: "Bank transfer",
-            text: "Fund directly through your reserved NeuraPay/Paga account.",
+            text: "Fund directly through your reserved bank account.",
           },
           {
             icon: ShieldCheck,

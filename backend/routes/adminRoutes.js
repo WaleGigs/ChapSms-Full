@@ -256,6 +256,8 @@ function depositedTotalExpression(transactionsPath) {
 
                                 "neurapay",
 
+                                "pocketfi",
+
                                 "flutterwave",
 
                               ],
@@ -282,7 +284,7 @@ function depositedTotalExpression(transactionsPath) {
 
                               regex:
 
-                                "^(NeuraPay|Flutterwave).*wallet funding",
+                                "^(NeuraPay|PocketFi|Flutterwave).*wallet funding",
 
                               options: "i",
 

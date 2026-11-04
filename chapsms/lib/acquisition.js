@@ -98,7 +98,7 @@ export function trackSnapPurchase(tx) {
     tx?.type !== "deposit" ||
     tx?.status !== "completed" ||
     tx?.environment !== "live" ||
-    !["neurapay", "flutterwave"].includes(tx?.paymentGateway) ||
+    !["neurapay", "pocketfi", "flutterwave"].includes(tx?.paymentGateway) ||
     String(tx?.currency || "NGN").toUpperCase() !== "NGN" ||
     !ref || !Number.isFinite(price) || price <= 0
   ) return false;

@@ -28,7 +28,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 /*
- * BOTH payment providers sign their webhook payloads.
+ * ALL payment providers sign their webhook payloads.
  * Preserve the exact raw JSON bytes before Express parses them.
  *
  * Flutterwave:
@@ -38,6 +38,10 @@ app.use(cors(corsOptions));
  * NeuraPay:
  *   POST /api/payment/neurapay/webhook
  *   header: X-Neurapay-Signature
+ *
+ * PocketFi:
+ *   POST /api/payment/pocketfi/webhook
+ *   header: HTTP_POCKETFI_SIGNATURE
  */
 app.use(
   express.json({
@@ -47,7 +51,8 @@ app.use(
 
       if (
         url.startsWith("/api/payment/webhook") ||
-        url.startsWith("/api/payment/neurapay/webhook")
+        url.startsWith("/api/payment/neurapay/webhook") ||
+        url.startsWith("/api/payment/pocketfi/webhook")
       ) {
         req.rawBody = Buffer.from(buffer);
       }

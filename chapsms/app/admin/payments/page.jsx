@@ -263,6 +263,14 @@ function gatewayLabel(payment) {
 
 
 
+  if (gateway === "pocketfi") {
+
+    return "PocketFi Bank Transfer";
+
+  }
+
+
+
   if (gateway === "flutterwave") {
 
     return method === "card"
@@ -822,7 +830,7 @@ export default function AdminPaymentsPage() {
 
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
 
-                Latest real wallet activity across NeuraPay, Flutterwave, admin wallet adjustments, purchases and refunds.
+                Latest real wallet activity across NeuraPay, PocketFi, Flutterwave, admin wallet adjustments, purchases and refunds.
 
               </p>
 

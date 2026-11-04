@@ -17,6 +17,16 @@ const {
 } = require("../controllers/neurapayController");
 
 const {
+  getVirtualAccount: getPocketFiAccount,
+  createVirtualAccount: createPocketFiAccount,
+  handleWebhook: handlePocketFiWebhook,
+} = require("../controllers/pocketfiController");
+
+const {
+  getActiveGateway,
+} = require("../services/paymentGatewayService");
+
+const {
   protect,
 } = require("../middleware/authMiddleware");
 
@@ -76,6 +86,46 @@ router.post(
   "/neurapay/verify",
   protect,
   verifyNeuraPayTransaction
+);
+
+/*
+ * ============================================================
+ * POCKETFI
+ * ============================================================
+ * The webhook is public but authenticated by PocketFi's HMAC
+ * signature inside pocketfiService. Customer routes are protected.
+ */
+router.post(
+  "/pocketfi/webhook",
+  handlePocketFiWebhook
+);
+
+router.get(
+  "/pocketfi/account",
+  protect,
+  getPocketFiAccount
+);
+
+router.post(
+  "/pocketfi/account",
+  protect,
+  createPocketFiAccount
+);
+
+/*
+ * Which gateway the Add Funds page should use right now.
+ */
+router.get(
+  "/gateway",
+  protect,
+  async (_req, res) => {
+    res.set("Cache-Control", "no-store");
+
+    return res.json({
+      success: true,
+      gateway: await getActiveGateway(),
+    });
+  }
 );
 
 module.exports = router;

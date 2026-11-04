@@ -27,10 +27,11 @@ const BALANCE_FIELDS = [
 const PAYMENT_GATEWAYS = [
   /*
    * Keep Flutterwave for historical wallet records that may already
-   * exist. New funding created by this integration uses "neurapay".
+   * exist. New funding uses "neurapay" or "pocketfi".
    */
   "flutterwave",
   "neurapay",
+  "pocketfi",
 ];
 
 const transactionSchema =

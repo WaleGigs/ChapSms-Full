@@ -37,6 +37,17 @@ export const settingsService = {
     return api("/admin/settings");
   },
 
+  getPaymentGateways() {
+    return api("/admin/settings/payment-gateway");
+  },
+
+  setPaymentGateway(gateway) {
+    return api("/admin/settings/payment-gateway", {
+      method: "PUT",
+      body: JSON.stringify({ gateway }),
+    });
+  },
+
   async updateAdminSettings(settings) {
     const response = await api("/admin/settings", {
       method: "PUT",

@@ -21,6 +21,7 @@ const ALLOWED_PREFIXES = [
   "/api/payment/status",
   "/api/payment/neurapay/webhook",
   "/api/payment/neurapay/verify",
+  "/api/payment/pocketfi/webhook",
 ];
 
 function isAllowedPath(path) {
