@@ -101,7 +101,9 @@ export default function WalletPage() {
   const [checkingBalance, setCheckingBalance] = useState(false);
   const [gateway, setGateway] = useState(null);
   const [accountLoaded, setAccountLoaded] = useState(false);
+  const [autoCreateFailed, setAutoCreateFailed] = useState(false);
 
+  const autoCreateStartedRef = useRef(false);
   const checkoutTrackedRef = useRef(new Set());
   // Baseline existing deposits; only report deposits first seen AFTER the initial wallet load.
   // The backend is authoritative for completion; this effect never credits money.
@@ -180,6 +182,28 @@ export default function WalletPage() {
   useEffect(() => {
     if (gateway && !accountLoaded) loadFundingAccount();
   }, [gateway, accountLoaded, loadFundingAccount]);
+
+  // PocketFi needs nothing from the customer, so open straight on the account details.
+  const isPocketFi = gateway?.id === "pocketfi";
+  const autoCreating = isPocketFi && accountLoaded && !account && !autoCreateFailed;
+
+  useEffect(() => {
+    if (!autoCreating || autoCreateStartedRef.current) return;
+    autoCreateStartedRef.current = true;
+
+    pocketfiService
+      .createAccount()
+      .then((response) => {
+        if (!response?.account) {
+          throw new Error("ChapsSms did not receive the PocketFi account details");
+        }
+        setAccount(response.account);
+      })
+      .catch((error) => {
+        console.error("PocketFi account setup failed:", error);
+        setAutoCreateFailed(true);
+      });
+  }, [autoCreating]);
 
   useEffect(() => {
     if (!account) return undefined;
@@ -340,12 +364,12 @@ export default function WalletPage() {
           </div>
         </div>
 
-        {accountLoading || !accountLoaded ? (
+        {accountLoading || !accountLoaded || autoCreating ? (
           <div className="mt-6 flex min-h-44 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
             <div className="text-center">
               <LoaderCircle size={28} className="mx-auto animate-spin text-blue-600" />
               <p className="mt-3 text-sm font-semibold text-[var(--muted-foreground)]">
-                Loading your funding account...
+                {autoCreating ? "Setting up your funding account..." : "Loading your funding account..."}
               </p>
             </div>
           </div>
