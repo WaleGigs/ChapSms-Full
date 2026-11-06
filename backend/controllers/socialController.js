@@ -1436,7 +1436,32 @@ async function loadProviderProductsSafely(
    CATALOG SYNC
 ========================================================= */
 
-async function refreshCatalog() {
+let refreshInFlight = null;
+let catalogCache = null;
+let catalogBuildInFlight = null;
+
+const CATALOG_RESPONSE_TTL_MS = 15 * 1000;
+
+function bustCatalogCache() {
+  catalogCache = null;
+}
+
+/*
+ * One provider refresh at a time: concurrent requests share it
+ * instead of each hitting Sameeha and LoggsPlug again.
+ */
+function refreshCatalog() {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshCatalogUncached().finally(() => {
+      refreshInFlight = null;
+      bustCatalogCache();
+    });
+  }
+
+  return refreshInFlight;
+}
+
+async function refreshCatalogUncached() {
   /*
    * IMPORTANT:
    * Providers are isolated from each other.
@@ -3216,164 +3241,99 @@ async function getLiveCandidates(
    CONTROLLERS
 ========================================================= */
 
-exports.getCatalog =
-  async (req, res) => {
-    let stale = false;
+async function buildCatalogPayload() {
+  const [products, latest, hiddenRuleKeys, pricingIndex] =
+    await Promise.all([
+      SocialProduct.find({ isActive: true })
+        .sort({ category: 1, name: 1 })
+        .lean(),
+      SocialProduct.findOne({
+        provider: { $in: getEnabledExternalProviders() },
+        isActive: true,
+      })
+        .sort({ lastSyncedAt: -1 })
+        .select("lastSyncedAt")
+        .lean(),
+      loadHiddenSocialRuleKeys(),
+      socialPricingService.loadPricingIndex(),
+    ]);
 
-    try {
-      /*
-       * House-stock timestamps must not affect the provider
-       * catalog refresh timer.
-       */
-      const latest =
-        await SocialProduct
-          .findOne({
-            provider: {
-              $in:
-                getEnabledExternalProviders(),
-            },
+  const hasProviderProduct = products.some((product) =>
+    getCachedProviderCandidates(product).some((candidate) =>
+      isCustomerProviderEnabled(candidate.provider)
+    )
+  );
 
-            isActive: true,
-          })
-          .sort({
-            lastSyncedAt: -1,
-          })
-          .select(
-            "lastSyncedAt"
-          );
+  const lastSync = latest?.lastSyncedAt
+    ? new Date(latest.lastSyncedAt).getTime()
+    : 0;
 
-      const lastSync =
-        latest?.lastSyncedAt
-          ? new Date(
-              latest.lastSyncedAt
-            ).getTime()
-          : 0;
+  const expired =
+    !lastSync || Date.now() - lastSync > getCatalogTtlMs();
 
-      const shouldRefresh =
-        !lastSync ||
-        Date.now() -
-          lastSync >
-          getCatalogTtlMs();
+  if (!hasProviderProduct) {
+    // Nothing cached yet: the first load has to wait for a sync.
+    await refreshCatalog();
+    return buildCatalogPayload();
+  }
 
-      if (
-        shouldRefresh
-      ) {
-        try {
-          await refreshCatalog();
-        } catch (
-          refreshError
-        ) {
-          stale = true;
+  if (expired) {
+    // Serve what we have now and refresh behind the scenes.
+    refreshCatalog().catch((error) =>
+      console.error("Social catalog background refresh failed:", error)
+    );
+  }
 
-          console.error(
-            "Social catalog refresh failed:",
-            refreshError
-          );
-        }
-      }
+  const customerProducts = buildCustomerCatalog(
+    products,
+    hiddenRuleKeys,
+    pricingIndex
+  );
 
-      let products =
-        await SocialProduct
-          .find({
-            isActive:
-              true,
-          })
-          .sort({
-            category: 1,
-            name: 1,
-          });
+  return {
+    success: true,
+    stale: false,
+    categories: [
+      ...new Set(customerProducts.map((item) => item.category)),
+    ],
+    products: customerProducts,
+  };
+}
 
-      const hasProviderProduct =
-        products.some(
-          (product) =>
-            getCachedProviderCandidates(
-              product
-            ).some(
-              (candidate) =>
-                isCustomerProviderEnabled(
-                  candidate.provider
-                )
-            )
-        );
+exports.getCatalog = async (req, res) => {
+  try {
+    if (
+      catalogCache &&
+      Date.now() - catalogCache.builtAt < CATALOG_RESPONSE_TTL_MS
+    ) {
+      return res.json(catalogCache.payload);
+    }
 
-      if (
-        !hasProviderProduct
-      ) {
-        /*
-         * No cached provider catalog exists yet.
-         * House stock by itself must not suppress
-         * the first provider sync.
-         */
-        await refreshCatalog();
-
-        products =
-          await SocialProduct
-            .find({
-              isActive:
-                true,
-            })
-            .sort({
-              category: 1,
-              name: 1,
-            });
-
-        stale = false;
-      }
-
-      const [
-        hiddenRuleKeys,
-        pricingIndex,
-      ] = await Promise.all([
-        loadHiddenSocialRuleKeys(),
-        socialPricingService.loadPricingIndex(),
-      ]);
-
-      const customerProducts =
-        buildCustomerCatalog(
-          products,
-          hiddenRuleKeys,
-          pricingIndex
-        );
-
-      const categories =
-        [
-          ...new Set(
-            customerProducts.map(
-              (item) =>
-                item.category
-            )
-          ),
-        ];
-
-      return res.json({
-        success: true,
-
-        stale,
-
-        categories,
-
-        products:
-          customerProducts,
-      });
-    } catch (error) {
-      console.error(
-        "Load social catalog error:",
-        error
-      );
-
-      return res
-        .status(502)
-        .json({
-          success: false,
-
-          code:
-            "SOCIAL_CATALOG_LOAD_FAILED",
-
-          message:
-            "ChapsSms could not load social products right now. Please try again.",
+    if (!catalogBuildInFlight) {
+      catalogBuildInFlight = buildCatalogPayload()
+        .then((payload) => {
+          catalogCache = { payload, builtAt: Date.now() };
+          return payload;
+        })
+        .finally(() => {
+          catalogBuildInFlight = null;
         });
     }
-  };
+
+    return res.json(await catalogBuildInFlight);
+  } catch (error) {
+    console.error("Load social catalog error:", error);
+
+    return res.status(502).json({
+      success: false,
+      code: "SOCIAL_CATALOG_LOAD_FAILED",
+      message:
+        "ChapsSms could not load social products right now. Please try again.",
+    });
+  }
+};
+
+exports.bustCatalogCache = bustCatalogCache;
 
 exports.refreshCatalog =
   async (req, res) => {
@@ -4204,3 +4164,4 @@ exports.getOrders =
         });
     }
   };
+require("../services/catalogCacheBus").register(bustCatalogCache);

@@ -431,6 +431,13 @@ export default function BuySocialsPage() {
       // Only products are stored. Category order is derived from products below,
       // so the provider's category order can never leak into the UI.
       setProducts(normalizedProducts);
+
+      try {
+        window.sessionStorage.setItem(
+          "chapsms:social-catalog",
+          JSON.stringify(normalizedProducts)
+        );
+      } catch {}
     } catch (error) {
       if (!silent) toast.error(getErrorMessage(error));
     } finally {
@@ -439,7 +446,22 @@ export default function BuySocialsPage() {
   }, []);
 
   useEffect(() => {
-    loadCatalog();
+    // Show the last catalogue straight away, then refresh it in the background.
+    let hadCache = false;
+
+    try {
+      const cached = JSON.parse(
+        window.sessionStorage.getItem("chapsms:social-catalog") || "null"
+      );
+
+      if (Array.isArray(cached) && cached.length > 0) {
+        setProducts(cached);
+        setCatalogLoading(false);
+        hadCache = true;
+      }
+    } catch {}
+
+    loadCatalog({ silent: hadCache });
     const timer = window.setInterval(() => loadCatalog({ silent: true }), 60000);
     return () => window.clearInterval(timer);
   }, [loadCatalog]);

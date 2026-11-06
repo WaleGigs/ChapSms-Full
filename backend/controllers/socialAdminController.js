@@ -2324,3 +2324,32 @@ exports.getAdminSocialOrders = async (req, res) => {
     });
   }
 };
+/*
+ * Admin changes that affect what customers see clear the cached catalogue
+ * as soon as the request succeeds.
+ */
+{
+  const catalogCacheBus = require("../services/catalogCacheBus");
+
+  for (const name of [
+    "setVisibility",
+    "createHouseProduct",
+    "updateHouseProduct",
+    "addHouseStock",
+    "saveSocialGlobalPricing",
+    "saveSocialProductRule",
+    "deleteSocialProductRule",
+  ]) {
+    const original = exports[name];
+
+    if (typeof original !== "function") continue;
+
+    exports[name] = (req, res, next) => {
+      res.on("finish", () => {
+        if (res.statusCode < 400) catalogCacheBus.bust();
+      });
+
+      return original(req, res, next);
+    };
+  }
+}
