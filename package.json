@@ -1,0 +1,7 @@
+{
+  "name": "chapssms-root",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix chapsms"
+  }
+}
