@@ -682,6 +682,16 @@ function getLoggsplugConfig() {
           .LOGGSPLUG_CURRENCY ||
           "NGN"
       ),
+
+    /*
+     * Optional HTTP proxy used only for LoggsPlug, whose
+     * Cloudflare challenges datacenter IPs. Unset = direct.
+     */
+    proxyUrl: String(
+      process.env
+        .LOGGSPLUG_PROXY_URL ||
+        ""
+    ).trim(),
   };
 }
 
@@ -709,6 +719,39 @@ function assertProviderKeys() {
    HTTP CLIENT
 ========================================================= */
 
+const proxiedFetchCache =
+  new Map();
+
+function getProxiedFetch(
+  proxyUrl
+) {
+  if (
+    !proxiedFetchCache.has(
+      proxyUrl
+    )
+  ) {
+    const {
+      fetch: undiciFetch,
+      ProxyAgent,
+    } = require("undici");
+
+    proxiedFetchCache.set(
+      proxyUrl,
+      {
+        fetch: undiciFetch,
+        dispatcher:
+          new ProxyAgent(
+            proxyUrl
+          ),
+      }
+    );
+  }
+
+  return proxiedFetchCache.get(
+    proxyUrl
+  );
+}
+
 async function providerRequest(
   url,
   {
@@ -717,6 +760,7 @@ async function providerRequest(
     body = undefined,
     timeoutMs =
       DEFAULT_REQUEST_TIMEOUT_MS,
+    proxyUrl = "",
   } = {}
 ) {
   const controller =
@@ -731,8 +775,24 @@ async function providerRequest(
     String(method).toUpperCase();
 
   try {
+    const proxied =
+      proxyUrl
+        ? getProxiedFetch(
+            proxyUrl
+          )
+        : null;
+
     const response =
-      await fetch(url, {
+      await (proxied
+        ? proxied.fetch
+        : fetch)(url, {
+        ...(proxied
+          ? {
+              dispatcher:
+                proxied.dispatcher,
+            }
+          : {}),
+
         method: upperMethod,
 
         headers: {
@@ -1104,8 +1164,21 @@ async function getLoggsplugProducts() {
           "X-Api-Key":
             config.apiKey,
         },
+        proxyUrl:
+          config.proxyUrl,
       }
     );
+
+  if (
+    response &&
+    typeof response.raw ===
+      "string"
+  ) {
+    // A bot-check page comes back as HTTP 200 HTML; never treat it as an empty catalogue.
+    throw new Error(
+      "LoggsPlug returned a non-JSON page (bot check)"
+    );
+  }
 
   const rawProducts =
     Array.isArray(
@@ -1200,23 +1273,39 @@ async function buyFromLoggsplug(
   const config =
     getLoggsplugConfig();
 
-  return providerRequest(
-    `${config.baseUrl}/order`,
-    {
-      method: "POST",
+  const result =
+    await providerRequest(
+      `${config.baseUrl}/order`,
+      {
+        method: "POST",
 
-      headers: {
-        "X-Api-Key":
-          config.apiKey,
-      },
+        headers: {
+          "X-Api-Key":
+            config.apiKey,
+        },
 
-      body: {
-        product_id:
-          Number(productId),
-        qty: quantity,
-      },
-    }
-  );
+        body: {
+          product_id:
+            Number(productId),
+          qty: quantity,
+        },
+
+        proxyUrl:
+          config.proxyUrl,
+      }
+    );
+
+  if (
+    result &&
+    typeof result.raw ===
+      "string"
+  ) {
+    throw new Error(
+      "LoggsPlug returned a non-JSON page (bot check)"
+    );
+  }
+
+  return result;
 }
 
 /* =========================================================

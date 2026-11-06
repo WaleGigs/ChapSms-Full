@@ -1932,12 +1932,25 @@ exports.deleteSocialProductRule = async (req, res) => {
    SOCIAL PROVIDER BALANCES + DASHBOARD METRICS
 ========================================================= */
 
-async function fetchJson(url, { headers = {}, timeoutMs = 15000 } = {}) {
+async function fetchJson(
+  url,
+  { headers = {}, timeoutMs = 15000, proxyUrl = "" } = {}
+) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    let doFetch = fetch;
+    let dispatcherOption = {};
+
+    if (proxyUrl) {
+      const { fetch: undiciFetch, ProxyAgent } = require("undici");
+      doFetch = undiciFetch;
+      dispatcherOption = { dispatcher: new ProxyAgent(proxyUrl) };
+    }
+
+    const response = await doFetch(url, {
+      ...dispatcherOption,
       method: "GET",
       headers: { Accept: "application/json", ...headers },
       signal: controller.signal,
@@ -2044,11 +2057,14 @@ async function getLoggsplugBalance() {
 
   if (!apiKey) throw new Error("LOGGSPLUG_API_KEY is missing");
 
+  const proxyUrl = String(process.env.LOGGSPLUG_PROXY_URL || "").trim();
+
   let data;
 
   try {
     data = await fetchJson(`${baseUrl}/me`, {
       headers: { "X-Api-Key": apiKey },
+      proxyUrl,
     });
   } catch (xApiKeyError) {
     // LoggsPlug also supports Bearer authentication on reseller endpoints.
@@ -2056,6 +2072,7 @@ async function getLoggsplugBalance() {
     try {
       data = await fetchJson(`${baseUrl}/me`, {
         headers: { Authorization: `Bearer ${apiKey}` },
+        proxyUrl,
       });
     } catch (bearerError) {
       const error = new Error(
