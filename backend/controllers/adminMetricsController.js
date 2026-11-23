@@ -6,6 +6,7 @@
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const Order = require('../models/Order');
+const SocialOrder = require('../models/SocialOrder');
 const { createResponseCache } = require('../utils/responseCache');
 
 const DAY_MS = 86400000;
@@ -22,6 +23,8 @@ const isLive = (tx) => tx.environment !== 'test' && tx.balanceField !== 'testBal
 const isCompletedDeposit = (tx) => tx?.type === 'deposit' && tx?.status === 'completed' && isLive(tx);
 const isEarnedOrder = (order) => !order.refunded && order.financialStatus !== 'refunded' &&
   (order.financialStatus === 'earned' || order.status === 'received');
+// Social orders are earned once delivered and never refunded.
+const isEarnedSocialOrder = (order) => !order.refunded && order.status === 'completed';
 const percent = (part, whole) => whole > 0 ? Number((100 * part / whole).toFixed(1)) : 0;
 
 // Reports are cached briefly; the dashboard's refresh button sends fresh=1.
@@ -69,7 +72,7 @@ async function buildDailyMetrics(days) {
   }
 
   const userIds = users.map((u) => u._id);
-  const [wallets, orders] = userIds.length ? await Promise.all([
+  const [wallets, smsOrders, socialOrders] = userIds.length ? await Promise.all([
     // Filter transactions in Mongo so only completed live deposits leave the database.
     Wallet.aggregate([
       { $match: { user: { $in: userIds } } },
@@ -86,7 +89,9 @@ async function buildDailyMetrics(days) {
     ]),
     Order.find({ user: { $in: userIds }, createdAt: { $lte: now } })
       .select('user createdAt status financialStatus refunded sellingPrice price providerCostNgn profit').lean(),
-  ]) : [[], []];
+    SocialOrder.find({ user: { $in: userIds }, createdAt: { $lte: now } })
+      .select('user createdAt status refunded sellingPrice providerCostNgn profit').lean(),
+  ]) : [[], [], []];
 
   const fundedOnSignupDay = new Map();
   const fundedToDate = new Map();
@@ -120,8 +125,13 @@ async function buildDailyMetrics(days) {
     }
   }
 
-  for (const order of orders) {
-    if (!isEarnedOrder(order) || !order.createdAt) continue;
+  // SMS number orders and social orders both count toward purchases, buyers and profit.
+  const earned = [
+    ...smsOrders.filter(isEarnedOrder),
+    ...socialOrders.filter(isEarnedSocialOrder),
+  ];
+  for (const order of earned) {
+    if (!order.createdAt) continue;
     const userId = idOf(order.user);
     const cohort = cohortByUser.get(userId);
     if (!cohort) continue;
@@ -183,11 +193,11 @@ async function buildDailyMetrics(days) {
       usersBalance: 'Sum of current live wallet balances belonging to the signup cohort; not historical end-of-day balances.',
       boughtSameDay: 'Distinct signup-day cohort customers who BOTH completed a live wallet top-up AND made an earned, non-refunded SMS purchase on their signup day.',
       boughtSameDayPercent: 'Same-day buyers who topped up divided by signup-day customers who topped up, multiplied by 100.',
-      boughtToDate: 'Distinct cohort customers with an earned SMS order through report time.',
+      boughtToDate: 'Distinct cohort customers with an earned SMS or social order through report time.',
       boughtToDatePercent: 'Bought-to-date customers divided by that day’s signups.',
-      purchases: 'Count of earned, non-refunded SMS number orders by the cohort from registration through report time. Each repeat order counts separately.',
-      profitSameDay: 'Profit from earned, non-refunded cohort orders created on signup day.',
-      profitToDate: 'Profit from earned, non-refunded cohort orders created through report time.',
+      purchases: 'Count of earned, non-refunded SMS number and social orders by the cohort from registration through report time. Each repeat order counts separately.',
+      profitSameDay: 'Profit from earned, non-refunded SMS and social cohort orders created on signup day.',
+      profitToDate: 'Profit from earned, non-refunded SMS and social cohort orders created through report time.',
     },
   };
 }
