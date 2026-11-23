@@ -27,6 +27,9 @@ const procs = [
     env: {
       // Never run the order check locally alongside the live server.
       ORDER_RECONCILER_ENABLED: "false",
+      // Pin the API port: an inherited PORT (e.g. from a preview tool) would
+      // otherwise make the API grab the website's port.
+      PORT: process.env.API_PORT || "5050",
       NODE_OPTIONS: nodeOptions,
     },
   },
